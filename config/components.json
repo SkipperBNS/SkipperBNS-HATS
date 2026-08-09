@@ -1,0 +1,96 @@
+{
+  "pack_name": "SkipperBNS HATS",
+  "version": "1.0.0",
+  "components": [
+    {
+      "name": "Atmosphere",
+      "repo": "Atmosphere-NX/Atmosphere",
+      "asset_regex": "^atmosphere-.*\\.zip$"
+    },
+    {
+      "name": "Hekate + Nyx",
+      "repo": "CTCaer/hekate",
+      "asset_regex": "^hekate_ctcaer_.*\\.zip$"
+    },
+    {
+      "name": "JKSV",
+      "repo": "J-D-K/JKSV",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "Goldleaf",
+      "repo": "XorTroll/Goldleaf",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "NXThemesInstaller",
+      "repo": "exelix11/SwitchThemeInjector",
+      "asset_regex": ".*NXThemesInstaller.*\\.zip$"
+    },
+    {
+      "name": "Sphaira",
+      "repo": "ITotalJustice/sphaira",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "TinWoo",
+      "repo": "mrdude2478/Tinwoo-Release",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "MissionControl",
+      "repo": "ndeadly/MissionControl",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "SaltyNX",
+      "repo": "masagrator/SaltyNX",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "nx-ovlloader",
+      "repo": "ppkantorski/nx-ovlloader",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "Ultrahand Overlay",
+      "repo": "ppkantorski/Ultrahand-Overlay",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "EdiZon Overlay",
+      "repo": "proferabg/EdiZon-Overlay",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "FPSLocker",
+      "repo": "masagrator/FPSLocker",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "QuickNTP",
+      "repo": "nedex/QuickNTP",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "Status Monitor",
+      "repo": "masagrator/Status-Monitor-Overlay",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "Sysmodules Overlay",
+      "repo": "ppkantorski/ovl-sysmodules",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "emuiibo",
+      "repo": "XorTroll/emuiibo",
+      "asset_regex": ".*\\.zip$"
+    },
+    {
+      "name": "sys-clk",
+      "repo": "ppkantorski/sys-clk",
+      "asset_regex": ".*\\.zip$"
+    }
+  ]
+}
