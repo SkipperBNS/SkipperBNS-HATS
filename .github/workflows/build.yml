@@ -1,0 +1,50 @@
+name: Build HATS Pack
+
+on:
+  workflow_dispatch:
+
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build HATS pack
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+
+          if ($version.StartsWith("v")) {
+              $version = $version.Substring(1)
+          }
+
+          .\scripts\build.ps1 -Version $version
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem .\dist\*.zip |
+            Get-FileHash -Algorithm SHA256 |
+            ForEach-Object {
+              "$($_.Hash)  $($_.Path)"
+            } |
+            Out-File .\dist\SHA256SUMS.txt -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SkipperBNS HATS ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
