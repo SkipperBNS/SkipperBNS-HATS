@@ -22,8 +22,10 @@
     {
       "name": "Goldleaf",
       "repo": "XorTroll/Goldleaf",
-      "asset_regex": ".*\\.zip$"
-    },
+      "asset_regex": "^Goldleaf\\.nro$",
+      "mode": "nro",
+      "destination": "switch/Goldleaf.nro"
+    }
     {
       "name": "NXThemesInstaller",
       "repo": "exelix11/SwitchThemeInjector",
