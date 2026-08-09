@@ -18,6 +18,7 @@ function Download-File {
         -OutFile $Destination `
         -Headers @{
             "User-Agent" = "SkipperBNS-HATS-Builder"
+            "Accept" = "application/octet-stream"
         }
 }
 
@@ -30,7 +31,7 @@ function Get-LatestRelease {
 
     Write-Host "Checking latest release: $Repo"
 
-    return Invoke-RestMethod `
+    Invoke-RestMethod `
         -Uri $Url `
         -Headers @{
             "Accept" = "application/vnd.github+json"
@@ -52,11 +53,15 @@ function Get-ReleaseAsset {
     ) | Select-Object -First 1
 
     if ($null -eq $Asset) {
+
+        Write-Host ""
+        Write-Host "ERROR: No matching asset found." -ForegroundColor Red
+        Write-Host "Required pattern: $Regex" -ForegroundColor Yellow
         Write-Host ""
         Write-Host "Available assets:" -ForegroundColor Yellow
 
         foreach ($Available in $Release.assets) {
-            Write-Host " - $($Available.name)"
+            Write-Host "  $($Available.name)"
         }
 
         throw "Could not find an asset matching: $Regex"
@@ -154,23 +159,26 @@ foreach ($Component in $Config.components) {
 
     Write-Host "Asset: $($Asset.name)"
 
-    $SafeName = [IO.Path]::GetFileName($Asset.name)
+    $DownloadName = [IO.Path]::GetFileName($Asset.name)
 
     $DownloadPath = Join-Path `
         $Work `
-        $SafeName
+        $DownloadName
 
     Download-File `
         -Url $Asset.browser_download_url `
         -Destination $DownloadPath
 
-    #
-    # Individual NRO/application file
-    #
+    # ======================================
+    # NRO COMPONENT
+    # ======================================
+
     if ($Component.mode -eq "nro") {
 
+        Write-Host "Installing NRO component..."
+
         if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-            throw "Component '$($Component.name)' uses mode 'nro' but has no destination."
+            throw "NRO component '$($Component.name)' has no destination."
         }
 
         $Destination = Join-Path `
@@ -192,13 +200,17 @@ foreach ($Component in $Config.components) {
             -Destination $Destination `
             -Force
 
-        Write-Host "Installed: $Destination"
+        Write-Host "Installed:"
+        Write-Host $Destination
     }
 
-    #
-    # ZIP archive
-    #
-    elseif ($Asset.name -match "\.zip$") {
+    # ======================================
+    # ZIP COMPONENT
+    # ======================================
+
+    elseif ($DownloadName -match "\.zip$") {
+
+        Write-Host "Extracting ZIP..."
 
         $Extracted = Join-Path `
             $Work `
@@ -210,8 +222,6 @@ foreach ($Component in $Config.components) {
             -Path $Extracted |
             Out-Null
 
-        Write-Host "Extracting: $($Asset.name)"
-
         Expand-Archive `
             -Path $DownloadPath `
             -DestinationPath $Extracted `
@@ -221,12 +231,16 @@ foreach ($Component in $Config.components) {
             -Source $Extracted `
             -Destination $Pack
 
-        Write-Host "Installed ZIP component."
+        Write-Host "ZIP component installed."
     }
+
+    # ======================================
+    # UNSUPPORTED FORMAT
+    # ======================================
 
     else {
 
-        throw "Unsupported asset type: $($Asset.name)"
+        throw "Unsupported asset format: $DownloadName"
     }
 
     $Results += [PSCustomObject]@{
@@ -237,9 +251,9 @@ foreach ($Component in $Config.components) {
     }
 }
 
-#
-# Create build information
-#
+# ==========================================
+# BUILD INFORMATION
+# ==========================================
 
 $BuildInfo = [ordered]@{
     name       = $Config.pack_name
@@ -254,9 +268,9 @@ $BuildInfo |
         -LiteralPath "$Pack\HATS-BUILD.json" `
         -Encoding UTF8
 
-#
-# Create ZIP
-#
+# ==========================================
+# CREATE FINAL ZIP
+# ==========================================
 
 $ZipName = "$($Config.pack_name)-v$Version.zip"
 
@@ -265,7 +279,7 @@ $ZipPath = Join-Path `
     $ZipName
 
 Write-Host ""
-Write-Host "Creating pack:"
+Write-Host "Creating final pack..."
 Write-Host $ZipPath
 
 Compress-Archive `
@@ -282,4 +296,3 @@ Write-Host "Pack:"
 Write-Host $ZipPath
 Write-Host ""
 Write-Host "Components built: $($Results.Count)"
-Write-Host ""
