@@ -42,7 +42,7 @@ shell: pwsh
 run: |
   $version = "${{ github.ref_name }}"
   if ($version.StartsWith("v")) {
-$version = $version.Substring(1)
+ $version = $version.Substring(1)
   }
   .\scripts\build.ps1 -Version $version
 name: Generate checksums
@@ -51,10 +51,10 @@ run: |
   New-Item -ItemType Directory -Force -Path .\dist | Out-Null
   $zipFiles = Get-ChildItem .\dist*.zip -File
   if (-not $zipFiles) {
-throw "No ZIP files found in .\dist"
+ throw "No ZIP files found in .\dist"
   }
   $checksums = $zipFiles | ForEach-Object {
-$hash = Get-FileHash -LiteralPath $.FullName -Algorithm SHA256
+ $hash = Get-FileHash -LiteralPath $.FullName -Algorithm SHA256
 "$($hash.Hash)  $($.Name)"
   }
   $checksums | Out-File .\dist\SHA256SUMS.txt -Encoding utf8
