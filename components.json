@@ -1,0 +1,46 @@
+{
+  "pack_name": "SkipperBNS HATS",
+  "version": "1.0.0",
+  "components": [
+    {
+      "name": "Atmosphere",
+      "repo": "Atmosphere-NX/Atmosphere",
+      "asset_regex": "^atmosphere-.*\\.zip$",
+      "mode": "zip"
+    },
+    {
+      "name": "Hekate + Nyx",
+      "repo": "CTCaer/hekate",
+      "asset_regex": "^hekate_ctcaer_.*\\.zip$",
+      "mode": "zip"
+    },
+    {
+      "name": "JKSV",
+      "repo": "J-D-K/JKSV",
+      "asset_regex": "^JKSV\\.nro$",
+      "mode": "nro",
+      "destination": "switch/JKSV.nro"
+    },
+    {
+      "name": "Goldleaf",
+      "repo": "XorTroll/Goldleaf",
+      "asset_regex": "^Goldleaf\\.nro$",
+      "mode": "nro",
+      "destination": "switch/Goldleaf.nro"
+    },
+    {
+      "name": "NXThemesInstaller",
+      "repo": "exelix11/SwitchThemeInjector",
+      "asset_regex": "^NXThemesInstaller\\.nro$",
+      "mode": "nro",
+      "destination": "switch/NXThemesInstaller.nro"
+    },
+    {
+      "name": "Sysmodules Overlay",
+      "repo": "ppkantorski/ovl-sysmodules",
+      "asset_regex": "^ovlSysmodules\\.ovl$",
+      "mode": "ovl",
+      "destination": "switch/.overlays/ovlSysmodules.ovl"
+    }
+  ]
+}
