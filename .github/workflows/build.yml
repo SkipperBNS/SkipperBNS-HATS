@@ -172,4 +172,3 @@ jobs:
           files: |
             dist/*.zip
             dist/SHA256SUMS.txt
-```
