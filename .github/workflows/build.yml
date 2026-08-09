@@ -1,4 +1,4 @@
-   - name: Build HATS pack
+     name: Build HATS pack
      shell: pwsh
      run: |
       $ErrorActionPreference = "Stop"
