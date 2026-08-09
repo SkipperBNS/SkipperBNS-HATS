@@ -428,4 +428,3 @@ Write-Host "Version: $Version"
 Write-Host "Output:  $($OutputFile.FullName)"
 Write-Host "Size:    $($OutputFile.Length) bytes"
 Write-Host "========================================"
-```
