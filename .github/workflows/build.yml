@@ -32,12 +32,20 @@ jobs:
       - name: Generate checksums
         shell: pwsh
         run: |
-          Get-ChildItem .\dist\*.zip |
-            Get-FileHash -Algorithm SHA256 |
-            ForEach-Object {
-              "$($_.Hash)  $($_.Path)"
-            } |
-            Out-File .\dist\SHA256SUMS.txt -Encoding utf8
+          New-Item -ItemType Directory -Force -Path .\dist | Out-Null
+
+         $zipFiles = Get-ChildItem .\dist\*.zip -File
+
+         if (-not $zipFiles) {
+             throw "No ZIP files found in .\dist"
+         }
+
+         $checksums = $zipFiles | ForEach-Object {
+             $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+             "$($hash.Hash)  $($_.Name)"
+         }
+
+         $checksums | Out-File .\dist\SHA256SUMS.txt -Encoding utf8
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
