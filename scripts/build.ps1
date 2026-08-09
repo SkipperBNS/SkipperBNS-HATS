@@ -89,7 +89,6 @@ $Asset,
 [string]$Destination
 )
 
-```
 Write-Host "Downloading..."
 Write-Host "URL: $($Asset.browser_download_url)"
 
@@ -112,7 +111,6 @@ if ($DownloadedFile.Length -le 0) {
 }
 
 Write-Host "Downloaded: $($DownloadedFile.Length) bytes"
-```
 
 }
 
