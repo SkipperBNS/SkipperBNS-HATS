@@ -55,7 +55,6 @@ param(
 [string]$Repo
 )
 
-```
 $Url = "https://api.github.com/repos/$Repo/releases/latest"
 
 Write-Host "Requesting: $Url"
@@ -65,7 +64,6 @@ return Invoke-RestMethod `
     -Headers $Headers `
     -Method Get `
     -ErrorAction Stop
-```
 
 }
 
@@ -75,7 +73,6 @@ $Release,
 [string]$Regex
 )
 
-```
 foreach ($Asset in $Release.assets) {
     if ($Asset.name -match $Regex) {
         return $Asset
@@ -83,7 +80,6 @@ foreach ($Asset in $Release.assets) {
 }
 
 return $null
-```
 
 }
 
@@ -125,7 +121,6 @@ $Total = $Config.components.Count
 
 foreach ($Component in $Config.components) {
 
-```
 $Index++
 
 Write-Host ""
@@ -240,7 +235,6 @@ if (
 }
 
 throw "Unknown component mode: $($Component.mode)"
-```
 
 }
 
