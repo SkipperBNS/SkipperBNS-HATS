@@ -29,7 +29,9 @@
     {
       "name": "NXThemesInstaller",
       "repo": "exelix11/SwitchThemeInjector",
-      "asset_regex": ".*NXThemesInstaller.*\\.zip$"
+      "asset_regex": "^NXThemesInstaller\\.nro$",
+      "mode": "nro",
+      "destination": "switch/NXThemesInstaller.nro"
     },
     {
       "name": "Sphaira",
