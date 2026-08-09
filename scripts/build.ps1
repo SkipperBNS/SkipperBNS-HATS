@@ -1,26 +1,26 @@
 param(
-    [string]$Version = "",
-    [string]$Manifest = "$PSScriptRoot\..\config\components.json"
+    [string]$Version = "main"
 )
 
 $ErrorActionPreference = "Stop"
 
-function Download-File {
-    param(
-        [string]$Url,
-        [string]$Destination
-    )
+Write-Host "========================================"
+Write-Host "       SkipperBNS HATS Pack Builder"
+Write-Host "========================================"
 
-    Write-Host "Downloading: $Url"
+$Root = Split-Path -Parent $PSScriptRoot
+$Pack = Join-Path $Root "pack"
+$Work = Join-Path $Root "work"
+$ComponentsFile = Join-Path $Root "components.json"
 
-    Invoke-WebRequest `
-        -Uri $Url `
-        -OutFile $Destination `
-        -Headers @{
-            "User-Agent" = "SkipperBNS-HATS-Builder"
-            "Accept" = "application/octet-stream"
-        }
+if (Test-Path $Work) {
+    Remove-Item $Work -Recurse -Force
 }
+
+New-Item -ItemType Directory -Path $Work -Force | Out-Null
+New-Item -ItemType Directory -Path $Pack -Force | Out-Null
+
+$Config = Get-Content $ComponentsFile -Raw | ConvertFrom-Json
 
 function Get-LatestRelease {
     param(
@@ -29,156 +29,96 @@ function Get-LatestRelease {
 
     $Url = "https://api.github.com/repos/$Repo/releases/latest"
 
-    Write-Host "Checking latest release: $Repo"
-
-    Invoke-RestMethod `
+    return Invoke-RestMethod `
         -Uri $Url `
         -Headers @{
-            "Accept" = "application/vnd.github+json"
             "User-Agent" = "SkipperBNS-HATS-Builder"
         }
 }
 
-function Get-ReleaseAsset {
+function Find-Asset {
     param(
         $Release,
         [string]$Regex
     )
 
-    $Asset = @(
-        $Release.assets |
-        Where-Object {
-            $_.name -match $Regex
+    foreach ($Asset in $Release.assets) {
+        if ($Asset.name -match $Regex) {
+            return $Asset
         }
-    ) | Select-Object -First 1
+    }
+
+    return $null
+}
+
+foreach ($Component in $Config.components) {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Component: $($Component.name)"
+    Write-Host "Repository: $($Component.repo)"
+    Write-Host "========================================"
+
+    $Release = Get-LatestRelease $Component.repo
+
+    Write-Host "Release: $($Release.tag_name)"
+
+    $Asset = Find-Asset `
+        -Release $Release `
+        -Regex $Component.asset_regex
 
     if ($null -eq $Asset) {
-
         Write-Host ""
         Write-Host "ERROR: No matching asset found." -ForegroundColor Red
-        Write-Host "Required pattern: $Regex" -ForegroundColor Yellow
+        Write-Host "Required pattern: $($Component.asset_regex)"
+
         Write-Host ""
-        Write-Host "Available assets:" -ForegroundColor Yellow
+        Write-Host "Available assets:"
 
         foreach ($Available in $Release.assets) {
             Write-Host "  $($Available.name)"
         }
 
-        throw "Could not find an asset matching: $Regex"
+        throw "Could not find an asset matching: $($Component.asset_regex)"
     }
 
-    return $Asset
-}
-
-function Merge-Folder {
-    param(
-        [string]$Source,
-        [string]$Destination
-    )
-
-    New-Item `
-        -ItemType Directory `
-        -Force `
-        -Path $Destination |
-        Out-Null
-
-    Get-ChildItem `
-        -LiteralPath $Source `
-        -Force |
-        ForEach-Object {
-
-            $Target = Join-Path `
-                $Destination `
-                $_.Name
-
-            if ($_.PSIsContainer) {
-
-                Merge-Folder `
-                    -Source $_.FullName `
-                    -Destination $Target
-
-            } else {
-
-                Copy-Item `
-                    -LiteralPath $_.FullName `
-                    -Destination $Target `
-                    -Force
-            }
-        }
-}
-
-Write-Host "=========================================="
-Write-Host "       SkipperBNS HATS Pack Builder"
-Write-Host "=========================================="
-
-$Root = (Resolve-Path "$PSScriptRoot\..").Path
-
-$Work = Join-Path $Root "work"
-$Pack = Join-Path $Root "pack"
-$Dist = Join-Path $Root "dist"
-
-Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $Pack -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $Dist -Recurse -Force -ErrorAction SilentlyContinue
-
-New-Item -ItemType Directory -Force -Path $Work | Out-Null
-New-Item -ItemType Directory -Force -Path $Pack | Out-Null
-New-Item -ItemType Directory -Force -Path $Dist | Out-Null
-
-if (!(Test-Path $Manifest)) {
-    throw "components.json was not found: $Manifest"
-}
-
-$Config = Get-Content `
-    -LiteralPath $Manifest `
-    -Raw |
-    ConvertFrom-Json
-
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = $Config.version
-}
-
-$Results = @()
-
-foreach ($Component in $Config.components) {
-
-    Write-Host ""
-    Write-Host "=========================================="
-    Write-Host "Component: $($Component.name)"
-    Write-Host "Repository: $($Component.repo)"
-    Write-Host "=========================================="
-
-    $Release = Get-LatestRelease `
-        -Repo $Component.repo
-
-    Write-Host "Release: $($Release.tag_name)"
-
-    $Asset = Get-ReleaseAsset `
-        -Release $Release `
-        -Regex $Component.asset_regex
-
     Write-Host "Asset: $($Asset.name)"
+    Write-Host "Mode: $($Component.mode)"
 
-    $DownloadName = [IO.Path]::GetFileName($Asset.name)
+    $DownloadPath = Join-Path $Work $Asset.name
 
-    $DownloadPath = Join-Path `
-        $Work `
-        $DownloadName
+    Write-Host "Downloading..."
 
-    Download-File `
-        -Url $Asset.browser_download_url `
-        -Destination $DownloadPath
+    Invoke-WebRequest `
+        -Uri $Asset.browser_download_url `
+        -OutFile $DownloadPath
 
-    # ======================================
-    # NRO COMPONENT
-    # ======================================
+    # ========================================
+    # ZIP COMPONENT
+    # ========================================
 
-    if ($Component.mode -eq "nro") {
+    if ($Component.mode -eq "zip") {
 
-        Write-Host "Installing NRO component..."
+        Write-Host "Extracting ZIP..."
+
+        Expand-Archive `
+            -Path $DownloadPath `
+            -DestinationPath $Pack `
+            -Force
+
+        continue
+    }
+
+    # ========================================
+    # NRO / OVL COMPONENT
+    # ========================================
+
+    if ($Component.mode -eq "nro" -or
+        $Component.mode -eq "ovl" -or
+        $Component.mode -eq "file") {
 
         if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-            throw "NRO component '$($Component.name)' has no destination."
+            throw "Component '$($Component.name)' has no destination."
         }
 
         $Destination = Join-Path `
@@ -191,108 +131,44 @@ foreach ($Component in $Config.components) {
 
         New-Item `
             -ItemType Directory `
-            -Force `
-            -Path $DestinationFolder |
-            Out-Null
+            -Path $DestinationFolder `
+            -Force | Out-Null
 
         Copy-Item `
             -LiteralPath $DownloadPath `
             -Destination $Destination `
             -Force
 
-        Write-Host "Installed:"
-        Write-Host $Destination
+        Write-Host "Installed: $($Component.destination)"
+
+        continue
     }
 
-    # ======================================
-    # ZIP COMPONENT
-    # ======================================
-
-    elseif ($DownloadName -match "\.zip$") {
-
-        Write-Host "Extracting ZIP..."
-
-        $Extracted = Join-Path `
-            $Work `
-            ([guid]::NewGuid().ToString())
-
-        New-Item `
-            -ItemType Directory `
-            -Force `
-            -Path $Extracted |
-            Out-Null
-
-        Expand-Archive `
-            -Path $DownloadPath `
-            -DestinationPath $Extracted `
-            -Force
-
-        Merge-Folder `
-            -Source $Extracted `
-            -Destination $Pack
-
-        Write-Host "ZIP component installed."
-    }
-
-    # ======================================
-    # UNSUPPORTED FORMAT
-    # ======================================
-
-    else {
-
-        throw "Unsupported asset format: $DownloadName"
-    }
-
-    $Results += [PSCustomObject]@{
-        Name       = $Component.name
-        Version    = $Release.tag_name
-        Asset      = $Asset.name
-        Repository = "https://github.com/$($Component.repo)"
-    }
+    throw "Unknown component mode: $($Component.mode)"
 }
 
-# ==========================================
-# BUILD INFORMATION
-# ==========================================
-
-$BuildInfo = [ordered]@{
-    name       = $Config.pack_name
-    version    = $Version
-    generated  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    components = $Results
-}
-
-$BuildInfo |
-    ConvertTo-Json -Depth 10 |
-    Set-Content `
-        -LiteralPath "$Pack\HATS-BUILD.json" `
-        -Encoding UTF8
-
-# ==========================================
+# ========================================
 # CREATE FINAL ZIP
-# ==========================================
+# ========================================
 
-$ZipName = "$($Config.pack_name)-v$Version.zip"
+$Output = Join-Path `
+    $Root `
+    "SkipperBNS-HATS-$Version.zip"
 
-$ZipPath = Join-Path `
-    $Dist `
-    $ZipName
+if (Test-Path $Output) {
+    Remove-Item $Output -Force
+}
 
 Write-Host ""
-Write-Host "Creating final pack..."
-Write-Host $ZipPath
+Write-Host "Creating final HATS ZIP..."
 
 Compress-Archive `
     -Path "$Pack\*" `
-    -DestinationPath $ZipPath `
-    -CompressionLevel Optimal
+    -DestinationPath $Output `
+    -Force
 
 Write-Host ""
-Write-Host "=========================================="
-Write-Host "          BUILD COMPLETE"
-Write-Host "=========================================="
-Write-Host ""
-Write-Host "Pack:"
-Write-Host $ZipPath
-Write-Host ""
-Write-Host "Components built: $($Results.Count)"
+Write-Host "========================================"
+Write-Host "BUILD SUCCESSFUL"
+Write-Host "========================================"
+Write-Host "Output: $Output"
