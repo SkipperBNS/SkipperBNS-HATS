@@ -1,3 +1,4 @@
+```powershell
 param(
     [string]$Version = "main"
 )
@@ -19,6 +20,10 @@ Write-Host "Pack: $Pack"
 Write-Host "Work: $Work"
 Write-Host ""
 
+# ----------------------------------------
+# Prepare build directories
+# ----------------------------------------
+
 if (Test-Path $Work) {
     Remove-Item $Work -Recurse -Force
 }
@@ -32,6 +37,10 @@ New-Item -ItemType Directory -Path $Pack -Force | Out-Null
 
 Write-Host "Preparing build directories..."
 Write-Host ""
+
+# ----------------------------------------
+# Load components.json
+# ----------------------------------------
 
 if (-not (Test-Path $ComponentsFile)) {
     throw "components.json was not found: $ComponentsFile"
@@ -57,6 +66,10 @@ if ($null -eq $Config.components) {
 Write-Host "Components configured: $($Config.components.Count)"
 Write-Host ""
 
+# ----------------------------------------
+# GitHub API configuration
+# ----------------------------------------
+
 $GitHubToken = $env:GITHUB_TOKEN
 
 $Headers = @{
@@ -67,6 +80,10 @@ $Headers = @{
 if (-not [string]::IsNullOrWhiteSpace($GitHubToken)) {
     $Headers["Authorization"] = "Bearer $GitHubToken"
 }
+
+# ----------------------------------------
+# Get latest GitHub release
+# ----------------------------------------
 
 function Get-LatestRelease {
     param(
@@ -79,6 +96,7 @@ function Get-LatestRelease {
     Write-Host "Checking latest release..."
 
     for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+
         try {
             return Invoke-RestMethod `
                 -Uri $Url `
@@ -87,6 +105,7 @@ function Get-LatestRelease {
                 -ErrorAction Stop
         }
         catch {
+
             Write-Host "Release request failed (attempt $Attempt of 3)."
 
             if ($Attempt -eq 3) {
@@ -98,6 +117,10 @@ function Get-LatestRelease {
     }
 }
 
+# ----------------------------------------
+# Find release asset
+# ----------------------------------------
+
 function Find-Asset {
     param(
         [Parameter(Mandatory = $true)]
@@ -107,14 +130,40 @@ function Find-Asset {
         [string]$Regex
     )
 
+    $Matches = @()
+
     foreach ($Asset in $Release.assets) {
+
         if ($Asset.name -match $Regex) {
-            return $Asset
+            $Matches += $Asset
         }
     }
 
-    return $null
+    if ($Matches.Count -eq 0) {
+        return $null
+    }
+
+    # Prevent silently selecting the wrong file
+    if ($Matches.Count -gt 1) {
+
+        Write-Host ""
+        Write-Host "WARNING: Multiple assets matched:" -ForegroundColor Yellow
+        Write-Host "Pattern: $Regex"
+
+        foreach ($Match in $Matches) {
+            Write-Host "  $($Match.name)"
+        }
+
+        Write-Host ""
+        Write-Host "Using first matching asset: $($Matches[0].name)" -ForegroundColor Yellow
+    }
+
+    return $Matches[0]
 }
+
+# ----------------------------------------
+# Download asset
+# ----------------------------------------
 
 function Download-Asset {
     param(
@@ -147,6 +196,10 @@ function Download-Asset {
     Write-Host "Downloaded: $($DownloadedFile.Length) bytes"
 }
 
+# ----------------------------------------
+# Install ZIP
+# ----------------------------------------
+
 function Install-Zip {
     param(
         [Parameter(Mandatory = $true)]
@@ -165,6 +218,10 @@ function Install-Zip {
         -ErrorAction Stop
 }
 
+# ----------------------------------------
+# Install single file
+# ----------------------------------------
+
 function Install-File {
     param(
         [Parameter(Mandatory = $true)]
@@ -177,6 +234,7 @@ function Install-File {
     $DestinationFolder = Split-Path $Destination -Parent
 
     if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
+
         New-Item `
             -ItemType Directory `
             -Path $DestinationFolder `
@@ -191,6 +249,10 @@ function Install-File {
 
     Write-Host "Installed: $Destination"
 }
+
+# ----------------------------------------
+# Process components
+# ----------------------------------------
 
 $Index = 0
 $Total = $Config.components.Count
@@ -213,9 +275,14 @@ foreach ($Component in $Config.components) {
         throw "Component '$($Component.name)' has no asset_regex."
     }
 
+    if ([string]::IsNullOrWhiteSpace($Component.mode)) {
+        throw "Component '$($Component.name)' has no mode."
+    }
+
     Write-Host "Repository: $($Component.repo)"
     Write-Host "Mode: $($Component.mode)"
 
+    # Get latest release
     $Release = Get-LatestRelease $Component.repo
 
     if ($null -eq $Release) {
@@ -224,6 +291,7 @@ foreach ($Component in $Config.components) {
 
     Write-Host "Release: $($Release.tag_name)"
 
+    # Find correct asset
     $Asset = Find-Asset `
         -Release $Release `
         -Regex $Component.asset_regex
@@ -245,11 +313,55 @@ foreach ($Component in $Config.components) {
 
     Write-Host "Asset: $($Asset.name)"
 
+    # ----------------------------------------
+    # Validate asset type
+    # ----------------------------------------
+
+    switch ($Component.mode) {
+
+        "zip" {
+
+            if ($Asset.name -notmatch '\.zip$') {
+                throw "Component '$($Component.name)' is configured as ZIP but selected '$($Asset.name)'."
+            }
+        }
+
+        "nro" {
+
+            if ($Asset.name -notmatch '\.nro$') {
+                throw "Component '$($Component.name)' is configured as NRO but selected '$($Asset.name)'."
+            }
+        }
+
+        "ovl" {
+
+            if ($Asset.name -notmatch '\.ovl$') {
+                throw "Component '$($Component.name)' is configured as OVL but selected '$($Asset.name)'."
+            }
+        }
+
+        "file" {
+            # No extension validation required.
+        }
+
+        default {
+            throw "Unknown component mode '$($Component.mode)' for $($Component.name)"
+        }
+    }
+
+    # ----------------------------------------
+    # Download
+    # ----------------------------------------
+
     $DownloadPath = Join-Path $Work $Asset.name
 
     Download-Asset `
         -Asset $Asset `
         -Destination $DownloadPath
+
+    # ----------------------------------------
+    # Install
+    # ----------------------------------------
 
     switch ($Component.mode) {
 
@@ -285,8 +397,8 @@ foreach ($Component in $Config.components) {
                 throw "Component '$($Component.name)' has no destination."
             }
 
-            # Normalize overlay destination.
-            # Always install overlays under: switch\.overlays\
+            # Always install overlays under:
+            # switch\.overlays\
             $OverlayDestination = $Component.destination -replace '^switch[\\/]\.overlays[\\/]', 'switch\.overlays\'
 
             $Destination = Join-Path `
@@ -316,12 +428,12 @@ foreach ($Component in $Config.components) {
 
             continue
         }
-
-        default {
-            throw "Unknown component mode '$($Component.mode)' for $($Component.name)"
-        }
     }
 }
+
+# ----------------------------------------
+# Verify pack
+# ----------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
@@ -332,10 +444,12 @@ if (-not (Test-Path $Pack)) {
     throw "Pack directory does not exist."
 }
 
-$PackFiles = @(Get-ChildItem `
-    -Path $Pack `
-    -Recurse `
-    -File)
+$PackFiles = @(
+    Get-ChildItem `
+        -Path $Pack `
+        -Recurse `
+        -File
+)
 
 if ($PackFiles.Count -eq 0) {
     throw "Pack directory is empty."
@@ -343,6 +457,10 @@ if ($PackFiles.Count -eq 0) {
 
 Write-Host "Files in pack: $($PackFiles.Count)"
 Write-Host ""
+
+# ----------------------------------------
+# Create final ZIP
+# ----------------------------------------
 
 $Output = Join-Path `
     $Root `
@@ -369,6 +487,10 @@ if ($OutputFile.Length -le 0) {
     throw "Final ZIP is empty."
 }
 
+# ----------------------------------------
+# Final result
+# ----------------------------------------
+
 Write-Host ""
 Write-Host "========================================"
 Write-Host "BUILD SUCCESSFUL"
@@ -378,6 +500,7 @@ Write-Host "Size:   $($OutputFile.Length) bytes"
 Write-Host ""
 
 Write-Host "Pack contents:"
+
 Get-ChildItem `
     -Path $Pack `
     -Recurse `
@@ -386,4 +509,5 @@ Get-ChildItem `
     Format-Table -AutoSize
 
 Write-Host ""
-Write-Host "Build completed successfully." 
+Write-Host "Build completed successfully."
+```
