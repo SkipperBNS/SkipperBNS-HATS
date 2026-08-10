@@ -44,9 +44,8 @@
     {
       "name": "Sphaira",
       "repo": "ITotalJustice/sphaira",
-      "asset_regex": "^sphaira.*\\.nro$",
-      "mode": "nro",
-      "destination": "switch/sphaira.nro"
+      "asset_regex": "^sphaira\\.zip$",
+      "mode": "zip"
     },
     {
       "name": "Switch 90DNS Tester",
