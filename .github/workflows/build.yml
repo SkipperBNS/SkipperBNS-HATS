@@ -7,14 +7,14 @@ on:
       - "v*"
 
 permissions:
-  3contents: write
+  contents: write
 
 jobs:
   build:
     name: Build HATS Pack
     runs-on: windows-latest
 
-steps:
+    steps:
   - name: Checkout
     uses: actions/checkout@v5
 
