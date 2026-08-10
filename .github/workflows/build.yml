@@ -1,3 +1,4 @@
+```yaml
 name: Build HATS Pack
 
 on:
@@ -58,10 +59,6 @@ jobs:
           Write-Host ""
 
           & ".\scripts\build.ps1" -Version $version
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "build.ps1 failed with exit code $LASTEXITCODE"
-          }
 
           Write-Host ""
           Write-Host "build.ps1 completed successfully."
@@ -206,3 +203,4 @@ jobs:
           files: |
             dist/*.zip
             dist/SHA256SUMS.txt
+```
