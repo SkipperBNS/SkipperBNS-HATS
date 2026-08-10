@@ -1,17 +1,18 @@
+```yaml
 name: Build SkipperBNS HATS Pack
 
 on:
   workflow_dispatch:
 
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: hats-release-${{ github.ref }}
+  group: hats-release-main
   cancel-in-progress: false
 
 jobs:
@@ -20,6 +21,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
+
       # ==========================================
       # CHECKOUT
       # ==========================================
@@ -60,9 +62,6 @@ jobs:
             Write-Host "Size: $($file.Length) bytes"
           }
 
-          Write-Host ""
-          Write-Host "Local applications verified successfully."
-
       # ==========================================
       # BUILD HATS
       # ==========================================
@@ -77,7 +76,6 @@ jobs:
           Write-Host "=========================================="
           Write-Host " SkipperBNS HATS Pack Builder"
           Write-Host "=========================================="
-          Write-Host ""
 
           if (-not (Test-Path ".\scripts\build.ps1")) {
             throw "scripts/build.ps1 was not found."
@@ -87,45 +85,20 @@ jobs:
             throw "components.json was not found."
           }
 
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $version = "${{ github.ref_name }}"
-
-            if ($version.StartsWith("v")) {
-              $version = $version.Substring(1)
-            }
-          }
-          else {
-            $version = "main"
-          }
-
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            $version = "main"
-          }
-
-          Write-Host "Build version: $version"
+          Write-Host "Build version: main"
           Write-Host ""
 
-          Write-Host "Running build.ps1..."
-          Write-Host ""
+          & ".\scripts\build.ps1" -Version "main"
 
-          try {
-            & ".\scripts\build.ps1" -Version $version
-
-            if (-not $?) {
-              throw "build.ps1 reported a failure."
-            }
-          }
-          catch {
-            throw "build.ps1 failed: $($_.Exception.Message)"
+          if ($LASTEXITCODE -ne 0) {
+            throw "build.ps1 failed with exit code $LASTEXITCODE"
           }
 
           Write-Host ""
-          Write-Host "=========================================="
-          Write-Host " build.ps1 completed successfully"
-          Write-Host "=========================================="
+          Write-Host "Build completed successfully."
 
       # ==========================================
-      # PREPARE DIST
+      # PREPARE RELEASE ZIP
       # ==========================================
 
       - name: Prepare release files
@@ -156,26 +129,18 @@ jobs:
           )
 
           if ($zipFiles.Count -eq 0) {
-            throw "No HATS ZIP was produced by build.ps1."
+            throw "No HATS ZIP was produced."
           }
 
           $zip = $zipFiles |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
-          Write-Host ""
-          Write-Host "HATS ZIP found:"
+          Write-Host "Found:"
           Write-Host $zip.FullName
           Write-Host "Size: $($zip.Length) bytes"
-          Write-Host ""
 
-          if ($zip.Length -le 0) {
-            throw "HATS ZIP is empty."
-          }
-
-          $destination = Join-Path `
-            ".\dist" `
-            "SkipperBNS-HATS-main.zip"
+          $destination = ".\dist\SkipperBNS-HATS-main.zip"
 
           Copy-Item `
             -LiteralPath $zip.FullName `
@@ -183,18 +148,12 @@ jobs:
             -Force
 
           if (-not (Test-Path $destination)) {
-            throw "Failed to copy HATS ZIP into dist."
+            throw "Failed to create release ZIP."
           }
 
-          $copied = Get-Item $destination
-
-          if ($copied.Length -le 0) {
-            throw "Copied HATS ZIP is empty."
-          }
-
-          Write-Host "Release ZIP:"
-          Write-Host $copied.FullName
-          Write-Host "Size: $($copied.Length) bytes"
+          Write-Host ""
+          Write-Host "Release ZIP created:"
+          Write-Host $destination
 
       # ==========================================
       # SHA256
@@ -205,25 +164,19 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host " Generating SHA256 checksum"
-          Write-Host "=========================================="
-
           $zipPath = ".\dist\SkipperBNS-HATS-main.zip"
 
           if (-not (Test-Path $zipPath)) {
-            throw "SkipperBNS-HATS-main.zip was not found."
+            throw "Release ZIP was not found."
           }
-
-          $zip = Get-Item $zipPath
 
           $hash = (
             Get-FileHash `
-              $zip.FullName `
+              $zipPath `
               -Algorithm SHA256
           ).Hash
 
-          "$hash  $($zip.Name)" |
+          "$hash  SkipperBNS-HATS-main.zip" |
             Out-File `
               ".\dist\SHA256SUMS.txt" `
               -Encoding utf8
@@ -231,23 +184,15 @@ jobs:
           Write-Host ""
           Write-Host "SHA256:"
           Write-Host $hash
-          Write-Host ""
-
-          Write-Host "SHA256SUMS.txt:"
-          Get-Content ".\dist\SHA256SUMS.txt"
 
       # ==========================================
       # VERIFY
       # ==========================================
 
-      - name: Verify release
+      - name: Verify release files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          Write-Host "=========================================="
-          Write-Host " Verifying release"
-          Write-Host "=========================================="
 
           $zipPath = ".\dist\SkipperBNS-HATS-main.zip"
           $shaPath = ".\dist\SHA256SUMS.txt"
@@ -272,74 +217,62 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "ZIP:"
-          Write-Host "  $($zip.Name)"
-          Write-Host "  $($zip.Length) bytes"
+          Write-Host "=========================================="
+          Write-Host " RELEASE FILES VERIFIED"
+          Write-Host "=========================================="
+
+          Write-Host "ZIP: $($zip.Name)"
+          Write-Host "Size: $($zip.Length) bytes"
 
           Write-Host ""
-          Write-Host "SHA256:"
           Get-Content $shaPath
 
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host " BUILD VERIFIED SUCCESSFULLY"
-          Write-Host "=========================================="
-
       # ==========================================
-      # UPLOAD ACTIONS ARTIFACT
+      # UPLOAD ARTIFACT
       # ==========================================
 
       - name: Upload HATS build artifact
         uses: actions/upload-artifact@v6
         with:
-          name: SkipperBNS-HATS-${{ github.ref_name }}
+          name: SkipperBNS-HATS-main
           path: |
             dist/SkipperBNS-HATS-main.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
       # ==========================================
-      # PUBLISH GITHUB RELEASE
+      # CREATE / REPLACE MAIN RELEASE
       # ==========================================
 
-      - name: Publish GitHub Release
-        if: github.ref_type == 'tag'
+      - name: Publish HATS Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          $tag = "${{ github.ref_name }}"
-
-          Write-Host "=========================================="
-          Write-Host " Publishing SkipperBNS HATS Release"
-          Write-Host "=========================================="
-          Write-Host ""
+          $tag = "main"
 
           $zipPath = ".\dist\SkipperBNS-HATS-main.zip"
           $shaPath = ".\dist\SHA256SUMS.txt"
 
-          if (-not (Test-Path $zipPath)) {
-            throw "Release ZIP was not found."
-          }
+          Write-Host "=========================================="
+          Write-Host " Publishing SkipperBNS HATS"
+          Write-Host "=========================================="
 
-          if (-not (Test-Path $shaPath)) {
-            throw "SHA256SUMS.txt was not found."
-          }
-
-          Write-Host "Tag: $tag"
+          Write-Host ""
+          Write-Host "Release tag: $tag"
           Write-Host "ZIP: $zipPath"
           Write-Host "SHA256: $shaPath"
           Write-Host ""
 
-          Write-Host "Checking existing release..."
-
+          # Check whether the release already exists.
           gh release view $tag 2>$null
 
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release already exists."
-            Write-Host "Replacing release assets..."
+
+            Write-Host "Release '$tag' already exists."
+            Write-Host "Replacing existing assets..."
 
             gh release upload `
               $tag `
@@ -348,28 +281,37 @@ jobs:
               --clobber
 
             if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload release assets."
+              throw "Failed to replace release assets."
             }
+
+            Write-Host ""
+            Write-Host "Existing release updated successfully."
+
           }
           else {
-            Write-Host "Release does not exist."
+
+            Write-Host "Release '$tag' does not exist."
             Write-Host "Creating release..."
 
             gh release create `
               $tag `
               $zipPath `
               $shaPath `
-              --title "SkipperBNS HATS $tag" `
-              --generate-notes
+              --title "SkipperBNS HATS" `
+              --notes "Automatically updated SkipperBNS HATS pack."
 
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to create GitHub Release."
             }
+
+            Write-Host ""
+            Write-Host "Release created successfully."
           }
 
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host " RELEASE PUBLISHED SUCCESSFULLY"
+          Write-Host " RELEASE UPDATED SUCCESSFULLY"
           Write-Host "=========================================="
 
           gh release view $tag
+```
