@@ -1,24 +1,35 @@
 name: Build HATS Pack
 
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*"
 
+  workflow_dispatch:
+
 permissions:
   contents: write
 
+concurrency:
+  group: hats-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
-    name: Build HATS Pack
+    name: Build SkipperBNS HATS
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      # ==========================================
+      # CHECKOUT
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - name: Run HATS builder
+      # ==========================================
+      # BUILD
+      # ==========================================
+      - name: Build HATS pack
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -28,6 +39,7 @@ jobs:
           Write-Host "=========================================="
           Write-Host " SkipperBNS HATS Pack Builder"
           Write-Host "=========================================="
+          Write-Host ""
 
           if (-not (Test-Path ".\scripts\build.ps1")) {
             throw "scripts/build.ps1 was not found."
@@ -37,21 +49,27 @@ jobs:
             throw "components.json was not found."
           }
 
-          Write-Host ""
-          Write-Host "GitHub token configured: $(-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN))"
+          Write-Host "GitHub token configured:"
+          Write-Host (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN))
           Write-Host ""
 
-          $version = "${{ github.ref_name }}"
+          # Determine version
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}"
 
-          if ($version.StartsWith("v")) {
-            $version = $version.Substring(1)
+            if ($version.StartsWith("v")) {
+              $version = $version.Substring(1)
+            }
+          }
+          else {
+            $version = "main"
           }
 
           if ([string]::IsNullOrWhiteSpace($version)) {
             $version = "main"
           }
 
-          Write-Host "Version: $version"
+          Write-Host "Build version: $version"
           Write-Host ""
 
           Write-Host "Running build.ps1..."
@@ -59,10 +77,19 @@ jobs:
 
           & ".\scripts\build.ps1" -Version $version
 
-          Write-Host ""
-          Write-Host "build.ps1 completed successfully."
+          if ($LASTEXITCODE -ne 0) {
+            throw "build.ps1 failed with exit code $LASTEXITCODE"
+          }
 
-      - name: Prepare dist
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " build.ps1 completed successfully"
+          Write-Host "=========================================="
+
+      # ==========================================
+      # PREPARE DIST
+      # ==========================================
+      - name: Prepare release files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -70,33 +97,45 @@ jobs:
           Write-Host "=========================================="
           Write-Host " Preparing release files"
           Write-Host "=========================================="
+          Write-Host ""
 
           if (Test-Path ".\dist") {
             Remove-Item ".\dist" -Recurse -Force
           }
 
-          New-Item -ItemType Directory -Path ".\dist" -Force | Out-Null
+          New-Item `
+            -ItemType Directory `
+            -Path ".\dist" `
+            -Force | Out-Null
 
+          # Find the ZIP created by build.ps1.
+          # Ignore temporary/component ZIPs inside work/.
           $zipFiles = @(
             Get-ChildItem "." -Filter "*.zip" -File -Recurse |
             Where-Object {
               $_.FullName -notlike "*\dist\*" -and
+              $_.FullName -notlike "*\work\*" -and
               $_.Length -gt 0
             }
           )
 
           if ($zipFiles.Count -eq 0) {
-            throw "No ZIP file was produced by build.ps1."
+            throw "No HATS ZIP was produced by build.ps1."
           }
 
+          # The final HATS ZIP should be the newest ZIP.
           $zip = $zipFiles |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
-          Write-Host ""
-          Write-Host "Build ZIP found:"
+          Write-Host "HATS ZIP found:"
           Write-Host $zip.FullName
           Write-Host "Size: $($zip.Length) bytes"
+          Write-Host ""
+
+          if ($zip.Length -le 0) {
+            throw "HATS ZIP is empty."
+          }
 
           $destination = Join-Path ".\dist" $zip.Name
 
@@ -106,33 +145,48 @@ jobs:
             -Force
 
           if (-not (Test-Path $destination)) {
-            throw "Failed to copy ZIP into dist."
+            throw "Failed to copy HATS ZIP into dist."
           }
 
           $copied = Get-Item $destination
 
           if ($copied.Length -le 0) {
-            throw "Copied ZIP is empty."
+            throw "Copied HATS ZIP is empty."
           }
 
-          Write-Host ""
-          Write-Host "Release file:"
+          Write-Host "Release ZIP:"
           Write-Host $copied.FullName
           Write-Host "Size: $($copied.Length) bytes"
+          Write-Host ""
 
+      # ==========================================
+      # SHA256
+      # ==========================================
       - name: Generate SHA256 checksum
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $zipFiles = @(Get-ChildItem ".\dist\*.zip" -File)
+          Write-Host "=========================================="
+          Write-Host " Generating SHA256 checksum"
+          Write-Host "=========================================="
+          Write-Host ""
+
+          $zipFiles = @(
+            Get-ChildItem ".\dist\*.zip" -File
+          )
 
           if ($zipFiles.Count -eq 0) {
             throw "No ZIP file found in dist."
           }
 
           $lines = foreach ($file in $zipFiles) {
-            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash
+            $hash = (
+              Get-FileHash `
+                $file.FullName `
+                -Algorithm SHA256
+            ).Hash
+
             "$hash  $($file.Name)"
           }
 
@@ -140,31 +194,40 @@ jobs:
             ".\dist\SHA256SUMS.txt" `
             -Encoding utf8
 
-          Write-Host ""
           Write-Host "SHA256SUMS.txt:"
+          Write-Host ""
+
           Get-Content ".\dist\SHA256SUMS.txt"
 
-      - name: Verify build output
+          Write-Host ""
+
+      # ==========================================
+      # VERIFY
+      # ==========================================
+      - name: Verify release files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           Write-Host "=========================================="
-          Write-Host " Verifying build"
+          Write-Host " Verifying release"
           Write-Host "=========================================="
+          Write-Host ""
 
           if (-not (Test-Path ".\dist")) {
             throw "dist directory does not exist."
           }
 
-          $zipFiles = @(Get-ChildItem ".\dist\*.zip" -File)
+          $zipFiles = @(
+            Get-ChildItem ".\dist\*.zip" -File
+          )
 
-          if ($zipFiles.Count -eq 0) {
-            throw "No ZIP file exists in dist."
+          if ($zipFiles.Count -ne 1) {
+            throw "Expected exactly one HATS ZIP, found $($zipFiles.Count)."
           }
 
           foreach ($file in $zipFiles) {
-            Write-Host "ZIP: $($file.Name)"
+            Write-Host "ZIP:  $($file.Name)"
             Write-Host "Size: $($file.Length) bytes"
 
             if ($file.Length -le 0) {
@@ -176,29 +239,107 @@ jobs:
             throw "SHA256SUMS.txt was not created."
           }
 
+          $checksumFile = Get-Item ".\dist\SHA256SUMS.txt"
+
+          if ($checksumFile.Length -le 0) {
+            throw "SHA256SUMS.txt is empty."
+          }
+
           Write-Host ""
-          Write-Host "SHA256SUMS.txt found."
+          Write-Host "SHA256SUMS.txt:"
+          Get-Content ".\dist\SHA256SUMS.txt"
+
           Write-Host ""
           Write-Host "=========================================="
           Write-Host " BUILD VERIFIED SUCCESSFULLY"
           Write-Host "=========================================="
 
-      - name: Upload HATS ZIP
-        uses: actions/upload-artifact@v4
+      # ==========================================
+      # UPLOAD WORKFLOW ARTIFACT
+      # ==========================================
+      - name: Upload HATS build artifact
+        uses: actions/upload-artifact@v6
         with:
-          name: SkipperBNS-HATS
+          name: SkipperBNS-HATS-${{ github.ref_name }}
           path: |
             dist/*.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: SkipperBNS HATS ${{ github.ref_name }}
-          generate_release_notes: true
-          files: |
-            dist/*.zip
-            dist/SHA256SUMS.txt
+      # ==========================================
+      # CREATE GITHUB RELEASE
+      # ==========================================
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tag = "${{ github.ref_name }}"
+
+          $zipFiles = @(
+            Get-ChildItem ".\dist\*.zip" -File
+          )
+
+          if ($zipFiles.Count -ne 1) {
+            throw "Expected exactly one HATS ZIP."
+          }
+
+          $zip = $zipFiles[0]
+
+          $checksum = Get-Item ".\dist\SHA256SUMS.txt"
+
+          Write-Host "=========================================="
+          Write-Host " Publishing GitHub Release"
+          Write-Host "=========================================="
+          Write-Host ""
+
+          Write-Host "Tag:"
+          Write-Host $tag
+          Write-Host ""
+
+          Write-Host "ZIP:"
+          Write-Host $zip.FullName
+          Write-Host ""
+
+          Write-Host "SHA256:"
+          Write-Host $checksum.FullName
+          Write-Host ""
+
+          # Check whether the release already exists.
+          gh release view $tag 2>$null
+
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists."
+            Write-Host "Uploading/replacing release assets..."
+
+            gh release upload `
+              $tag `
+              $zip.FullName `
+              $checksum.FullName `
+              --clobber
+          }
+          else {
+            Write-Host "Creating release $tag..."
+
+            gh release create `
+              $tag `
+              $zip.FullName `
+              $checksum.FullName `
+              --title "SkipperBNS HATS $tag" `
+              --generate-notes
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release operation failed with exit code $LASTEXITCODE"
+          }
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " RELEASE PUBLISHED SUCCESSFULLY"
+          Write-Host "=========================================="
+          Write-Host ""
+
+          gh release view $tag
