@@ -291,9 +291,7 @@ foreach ($Component in $Config.components) {
     Write-Host "Release: $($Release.tag_name)"
 
     # Find correct asset
-    $Asset = Find-Asset `
-        -Release $Release `
-        -Regex $Component.asset_regex
+    $Asset = Find-Asset -Release $Release -Regex $Component.asset_regex
 
     if ($null -eq $Asset) {
 
@@ -354,9 +352,7 @@ foreach ($Component in $Config.components) {
 
     $DownloadPath = Join-Path $Work $Asset.name
 
-    Download-Asset `
-        -Asset $Asset `
-        -Destination $DownloadPath
+    Download-Asset -Asset $Asset -Destination $DownloadPath
 
     # ----------------------------------------
     # Install
@@ -366,9 +362,7 @@ foreach ($Component in $Config.components) {
 
         "zip" {
 
-            Install-Zip `
-                -ZipPath $DownloadPath `
-                -Destination $Pack
+            Install-Zip -ZipPath $DownloadPath -Destination $Pack
 
             continue
         }
@@ -383,9 +377,7 @@ foreach ($Component in $Config.components) {
                 $Pack `
                 $Component.destination
 
-            Install-File `
-                -Source $DownloadPath `
-                -Destination $Destination
+            Install-File -Source $DownloadPath -Destination $Destination
 
             continue
         }
@@ -443,12 +435,7 @@ if (-not (Test-Path $Pack)) {
     throw "Pack directory does not exist."
 }
 
-$PackFiles = @(
-    Get-ChildItem `
-        -Path $Pack `
-        -Recurse `
-        -File
-)
+$PackFiles = @(Get-ChildItem -Path $Pack -Recurse -File)
 
 if ($PackFiles.Count -eq 0) {
     throw "Pack directory is empty."
@@ -461,9 +448,7 @@ Write-Host ""
 # Create final ZIP
 # ----------------------------------------
 
-$Output = Join-Path `
-    $Root `
-    "SkipperBNS-HATS-$Version.zip"
+$Output = Join-Path $Root "SkipperBNS-HATS-$Version.zip"
 
 if (Test-Path $Output) {
     Remove-Item $Output -Force
@@ -471,10 +456,7 @@ if (Test-Path $Output) {
 
 Write-Host "Creating final HATS ZIP..."
 
-Compress-Archive `
-    -Path (Join-Path $Pack "*") `
-    -DestinationPath $Output `
-    -Force
+Compress-Archive -Path (Join-Path $Pack "*") -DestinationPath $Output -Force
 
 if (-not (Test-Path $Output)) {
     throw "Final ZIP was not created."
