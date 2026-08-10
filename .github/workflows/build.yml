@@ -13,14 +13,13 @@ jobs:
   build:
     name: Build HATS Pack
     runs-on: windows-latest
-    
-steps:
-  - name: Checkout
-    uses: actions/checkout@v5
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v5
 
-  - name: Build HATS Pack
-    shell: pwsh
-    run: |
+     - name: Build HATS Pack
+   shell: pwsh
+   run: |
       $ErrorActionPreference = "Stop"
 
       Write-Host "=========================================="
@@ -101,7 +100,7 @@ steps:
       Write-Host "Copied to:"
       Write-Host $destination
 
-  - name: Generate SHA256 checksum
+      - name: Generate SHA256 checksum
     shell: pwsh
     run: |
       $ErrorActionPreference = "Stop"
@@ -122,7 +121,7 @@ steps:
       Write-Host ""
       Get-Content ".\dist\SHA256SUMS.txt"
 
-  - name: Verify build output
+      - name: Verify build output
     shell: pwsh
     run: |
       $ErrorActionPreference = "Stop"
@@ -149,7 +148,7 @@ steps:
       Write-Host ""
       Write-Host "BUILD VERIFIED SUCCESSFULLY."
 
-  - name: Create GitHub Release
+      - name: Create GitHub Release
     if: startsWith(github.ref, 'refs/tags/')
     uses: softprops/action-gh-release@v2
     with:
