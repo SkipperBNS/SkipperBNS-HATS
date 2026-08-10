@@ -13,8 +13,8 @@ jobs:
   build:
     name: Build HATS Pack
     runs-on: windows-latest
-
-    steps:
+    
+steps:
   - name: Checkout
     uses: actions/checkout@v5
 
