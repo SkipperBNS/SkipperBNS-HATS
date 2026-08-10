@@ -181,6 +181,15 @@ jobs:
           Write-Host " BUILD VERIFIED SUCCESSFULLY"
           Write-Host "=========================================="
 
+      - name: Upload HATS ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkipperBNS-HATS
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
