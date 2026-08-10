@@ -1,4 +1,3 @@
-```powershell
 param(
     [string]$Version = "main"
 )
