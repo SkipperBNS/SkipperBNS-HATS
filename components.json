@@ -107,9 +107,8 @@
     {
       "name": "Status Monitor Overlay",
       "repo": "masagrator/Status-Monitor-Overlay",
-      "asset_regex": ".*\\.ovl$",
-      "mode": "ovl",
-      "destination": "switch/.overlays/StatusMonitor.ovl"
+      "asset_regex": "^Status-Monitor-Overlay\\.zip$",
+      "mode": "zip"
     },
     {
       "name": "Sysmodules Overlay",
