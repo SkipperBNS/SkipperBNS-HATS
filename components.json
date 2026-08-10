@@ -145,15 +145,15 @@
     },
     {
       "name": "ftpd",
-      "mode": "local",
-      "source": "local/ftpd.nro",
+      "mode": "local_root",
+      "source": "ftpd.nro",
       "destination": "switch/ftpd.nro"
     },
     {
       "name": "Checkpoint",
-      "mode": "local",
-      "source": "local/Checkpoint.nro",
-      "destination": "switch/Checkpoint.nro"
+      "mode": "local_root",
+      "source": "checkpoint.nro",
+      "destination": "switch/checkpoint.nro"
     }
   ]
 }
