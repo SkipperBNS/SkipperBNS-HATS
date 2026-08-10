@@ -285,9 +285,13 @@ foreach ($Component in $Config.components) {
                 throw "Component '$($Component.name)' has no destination."
             }
 
+            # Normalize overlay destination.
+            # Always install overlays under: switch\.overlays\
+            $OverlayDestination = $Component.destination -replace '^switch[\\/]\.overlays[\\/]', 'switch\.overlays\'
+
             $Destination = Join-Path `
                 $Pack `
-                $Component.destination
+                $OverlayDestination
 
             Install-File `
                 -Source $DownloadPath `
