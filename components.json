@@ -38,7 +38,7 @@
     {
       "name": "HATS-Tools",
       "repo": "sthetix/HATS-Tools",
-      "asset_regex": ".*\\.zip$",
+      "asset_regex": "^hats-tools-.*\\.zip$",
       "mode": "zip"
     },
     {
@@ -69,32 +69,32 @@
     {
       "name": "MissionControl",
       "repo": "ndeadly/MissionControl",
-      "asset_regex": ".*\\.zip$",
+      "asset_regex": "^MissionControl-.*\\.zip$",
       "mode": "zip"
     },
     {
       "name": "SaltyNX",
       "repo": "masagrator/SaltyNX",
-      "asset_regex": ".*\\.zip$",
+      "asset_regex": "^SaltyNX\\.zip$",
       "mode": "zip"
     },
     {
       "name": "nx-ovlloader",
       "repo": "ppkantorski/nx-ovlloader",
-      "asset_regex": ".*\\.zip$",
+      "asset_regex": "^nx-ovlloader\\.zip$",
       "mode": "zip"
     },
     {
       "name": "EdiZon Overlay",
       "repo": "proferabg/EdiZon-Overlay",
-      "asset_regex": ".*\\.ovl$",
+      "asset_regex": "^ovlEdiZon\\.ovl$",
       "mode": "ovl",
       "destination": "switch/.overlays/EdiZon.ovl"
     },
     {
       "name": "FPSLocker",
       "repo": "masagrator/FPSLocker",
-      "asset_regex": ".*\\.ovl$",
+      "asset_regex": "^FPSLocker\\.ovl$",
       "mode": "ovl",
       "destination": "switch/.overlays/FPSLocker.ovl"
     },
@@ -120,21 +120,21 @@
     {
       "name": "Ultrahand Overlay",
       "repo": "ppkantorski/Ultrahand-Overlay",
-      "asset_regex": ".*\\.ovl$",
+      "asset_regex": "^ovlmenu\\.ovl$",
       "mode": "ovl",
       "destination": "switch/.overlays/ovlmenu.ovl"
     },
     {
       "name": "emuiibo",
       "repo": "XorTroll/emuiibo",
-      "asset_regex": ".*\\.zip$",
+      "asset_regex": "^emuiibo\\.zip$",
       "mode": "zip"
     },
     {
       "name": "sys-clk",
       "repo": "ppkantorski/sys-clk",
-      "asset_regex": ".*\\.zip$",
+      "asset_regex": "^sys-clk-.*\\.zip$",
       "mode": "zip"
     }
   ]
-} 
+}
