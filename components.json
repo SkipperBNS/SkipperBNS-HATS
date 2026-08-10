@@ -21,6 +21,12 @@
       "mode": "zip"
     },
     {
+      "name": "Custom Hekate Background",
+      "mode": "local_root",
+      "source": "assets/background.bmp",
+      "destination": "bootloader/res/background.bmp"
+    },
+    {
       "name": "JKSV",
       "repo": "J-D-K/JKSV",
       "asset_regex": "^JKSV\\.nro$",
