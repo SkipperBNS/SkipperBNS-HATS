@@ -1,0 +1,193 @@
+name: Build HATS Pack
+
+"on":
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build HATS Pack
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run HATS builder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host " SkipperBNS HATS Pack Builder"
+          Write-Host "=========================================="
+
+          if (-not (Test-Path ".\scripts\build.ps1")) {
+            throw "scripts/build.ps1 was not found."
+          }
+
+          if (-not (Test-Path ".\components.json")) {
+            throw "components.json was not found."
+          }
+
+          $version = "${{ github.ref_name }}"
+
+          if ($version.StartsWith("v")) {
+            $version = $version.Substring(1)
+          }
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = "main"
+          }
+
+          Write-Host "Version: $version"
+          Write-Host ""
+
+          Write-Host "Running build.ps1..."
+          Write-Host ""
+
+          & ".\scripts\build.ps1" -Version $version
+
+          if (-not $?) {
+            throw "build.ps1 failed."
+          }
+
+          Write-Host ""
+          Write-Host "build.ps1 completed successfully."
+
+      - name: Prepare dist
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host " Preparing release files"
+          Write-Host "=========================================="
+
+          if (Test-Path ".\dist") {
+            Remove-Item ".\dist" -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path ".\dist" -Force | Out-Null
+
+          $zipFiles = @(
+            Get-ChildItem "." -Filter "*.zip" -File -Recurse |
+            Where-Object {
+              $_.FullName -notlike "*\dist\*" -and
+              $_.Length -gt 0
+            }
+          )
+
+          if ($zipFiles.Count -eq 0) {
+            throw "No ZIP file was produced by build.ps1."
+          }
+
+          $zip = $zipFiles |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          Write-Host ""
+          Write-Host "Build ZIP found:"
+          Write-Host $zip.FullName
+          Write-Host "Size: $($zip.Length) bytes"
+
+          $destination = Join-Path ".\dist" $zip.Name
+
+          Copy-Item `
+            -LiteralPath $zip.FullName `
+            -Destination $destination `
+            -Force
+
+          if (-not (Test-Path $destination)) {
+            throw "Failed to copy ZIP into dist."
+          }
+
+          $copied = Get-Item $destination
+
+          if ($copied.Length -le 0) {
+            throw "Copied ZIP is empty."
+          }
+
+          Write-Host ""
+          Write-Host "Release file:"
+          Write-Host $copied.FullName
+          Write-Host "Size: $($copied.Length) bytes"
+
+      - name: Generate SHA256 checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $zipFiles = @(Get-ChildItem ".\dist\*.zip" -File)
+
+          if ($zipFiles.Count -eq 0) {
+            throw "No ZIP file found in dist."
+          }
+
+          $lines = foreach ($file in $zipFiles) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash
+            "$hash  $($file.Name)"
+          }
+
+          $lines | Out-File `
+            ".\dist\SHA256SUMS.txt" `
+            -Encoding utf8
+
+          Write-Host ""
+          Write-Host "SHA256SUMS.txt:"
+          Get-Content ".\dist\SHA256SUMS.txt"
+
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host " Verifying build"
+          Write-Host "=========================================="
+
+          if (-not (Test-Path ".\dist")) {
+            throw "dist directory does not exist."
+          }
+
+          $zipFiles = @(Get-ChildItem ".\dist\*.zip" -File)
+
+          if ($zipFiles.Count -eq 0) {
+            throw "No ZIP file exists in dist."
+          }
+
+          foreach ($file in $zipFiles) {
+            Write-Host "ZIP: $($file.Name)"
+            Write-Host "Size: $($file.Length) bytes"
+
+            if ($file.Length -le 0) {
+              throw "ZIP is empty."
+            }
+          }
+
+          if (-not (Test-Path ".\dist\SHA256SUMS.txt")) {
+            throw "SHA256SUMS.txt was not created."
+          }
+
+          Write-Host ""
+          Write-Host "SHA256SUMS.txt found."
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " BUILD VERIFIED SUCCESSFULLY"
+          Write-Host "=========================================="
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SkipperBNS HATS ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
