@@ -34,11 +34,8 @@ if (Test-Path $Pack) {
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 New-Item -ItemType Directory -Path $Pack -Force | Out-Null
 
-Write-Host "Preparing build directories..."
-Write-Host ""
-
 # ------------------------------------------------------------
-# LOAD COMPONENTS
+# CHECK COMPONENTS
 # ------------------------------------------------------------
 
 if (-not (Test-Path $ComponentsFile)) {
@@ -78,9 +75,12 @@ $Headers = @{
 
 if (-not [string]::IsNullOrWhiteSpace($GitHubToken)) {
     $Headers["Authorization"] = "Bearer $GitHubToken"
+    Write-Host "GitHub API token: configured"
+}
+else {
+    Write-Host "GitHub API token: NOT configured"
 }
 
-Write-Host "GitHub token configured: $(-not [string]::IsNullOrWhiteSpace($GitHubToken))"
 Write-Host ""
 
 # ------------------------------------------------------------
@@ -97,40 +97,24 @@ function Get-LatestRelease {
 
     Write-Host "Checking latest release..."
 
-    for ($Attempt = 1; $Attempt -le 5; $Attempt++) {
+    for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
         try {
-            $Response = Invoke-RestMethod `
+            return Invoke-RestMethod `
                 -Uri $Url `
                 -Headers $Headers `
                 -Method Get `
                 -ErrorAction Stop
-
-            return $Response
         }
         catch {
-            $Message = $_.Exception.Message
+            Write-Host "Release request failed (attempt $Attempt of 3)."
 
-            Write-Host "Release request failed (attempt $Attempt of 5)."
-            Write-Host $Message
-
-            if ($Attempt -eq 5) {
-                throw "Could not retrieve latest release for '$Repo'. $Message"
+            if ($Attempt -eq 3) {
+                throw "Could not retrieve latest release for '$Repo'. $($_.Exception.Message)"
             }
 
-            # GitHub API rate limiting.
-            # Wait progressively longer.
-            $Delay = 5 * $Attempt
-
-            if ($Message -match "403") {
-                $Delay = 15 * $Attempt
-            }
-
-            Write-Host "Waiting $Delay seconds before retry..."
-            Start-Sleep -Seconds $Delay
+            Start-Sleep -Seconds (5 * $Attempt)
         }
     }
-
-    throw "Unexpected error retrieving release for '$Repo'."
 }
 
 # ------------------------------------------------------------
@@ -156,7 +140,7 @@ function Find-Asset {
 }
 
 # ------------------------------------------------------------
-# DOWNLOAD ASSET
+# DOWNLOAD
 # ------------------------------------------------------------
 
 function Download-Asset {
@@ -170,56 +154,86 @@ function Download-Asset {
 
     Write-Host "Downloading: $($Asset.name)"
 
-    for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
-        try {
-            Invoke-WebRequest `
-                -Uri $Asset.browser_download_url `
-                -Headers $Headers `
-                -OutFile $Destination `
-                -UseBasicParsing `
-                -ErrorAction Stop
+    Invoke-WebRequest `
+        -Uri $Asset.browser_download_url `
+        -Headers $Headers `
+        -OutFile $Destination `
+        -UseBasicParsing `
+        -ErrorAction Stop
 
-            if (-not (Test-Path $Destination)) {
-                throw "Downloaded file does not exist."
-            }
-
-            $DownloadedFile = Get-Item $Destination
-
-            if ($DownloadedFile.Length -le 0) {
-                throw "Downloaded file is empty."
-            }
-
-            Write-Host "Downloaded: $($DownloadedFile.Length) bytes"
-            return
-        }
-        catch {
-            Write-Host "Download failed (attempt $Attempt of 3)."
-
-            if ($Attempt -eq 3) {
-                throw "Could not download '$($Asset.name)'. $($_.Exception.Message)"
-            }
-
-            Start-Sleep -Seconds (5 * $Attempt)
-        }
+    if (-not (Test-Path $Destination)) {
+        throw "Download failed: $Destination"
     }
+
+    $DownloadedFile = Get-Item $Destination
+
+    if ($DownloadedFile.Length -le 0) {
+        throw "Downloaded file is empty: $Destination"
+    }
+
+    Write-Host "Downloaded: $($DownloadedFile.Length) bytes"
 }
 
 # ------------------------------------------------------------
-# COPY TREE
-#
-# Copies files recursively while preserving their relative
-# paths. Existing files are overwritten.
-#
-# This prevents:
-#
-# SdOut\switch
-#
-# from becoming:
-#
-# pack\SdOut\switch
+# EXTRACT ZIP
 # ------------------------------------------------------------
 
-function Merge-Directory {
+function Install-Zip {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ZipPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )
+
+    Write-Host "Extracting ZIP:"
+    Write-Host "  $ZipPath"
+
+    Expand-Archive `
+        -Path $ZipPath `
+        -DestinationPath $Destination `
+        -Force `
+        -ErrorAction Stop
+}
+
+# ------------------------------------------------------------
+# COPY FILE
+# ------------------------------------------------------------
+
+function Install-File {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Source,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )
+
+    $DestinationFolder = Split-Path $Destination -Parent
+
+    if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
+        New-Item `
+            -ItemType Directory `
+            -Path $DestinationFolder `
+            -Force | Out-Null
+    }
+
+    Copy-Item `
+        -LiteralPath $Source `
+        -Destination $Destination `
+        -Force `
+        -ErrorAction Stop
+
+    Write-Host "Installed:"
+    Write-Host "  $Destination"
+}
+
+# ------------------------------------------------------------
+# COPY DIRECTORY CONTENTS WITHOUT SdOut WRAPPER
+# ------------------------------------------------------------
+
+function Merge-DirectoryContents {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Source,
@@ -237,47 +251,43 @@ function Merge-Directory {
         -Path $Destination `
         -Force | Out-Null
 
-    $SourceRoot = (Resolve-Path $Source).Path.TrimEnd('\')
+    $Items = Get-ChildItem -LiteralPath $Source -Force
 
-    $Files = Get-ChildItem `
-        -Path $Source `
-        -Recurse `
-        -File `
-        -Force
-
-    foreach ($File in $Files) {
-
-        $Relative = $File.FullName.Substring(
-            $SourceRoot.Length
-        ).TrimStart('\')
-
-        $Target = Join-Path `
-            $Destination `
-            $Relative
-
-        $TargetFolder = Split-Path `
-            $Target `
-            -Parent
-
-        if (-not [string]::IsNullOrWhiteSpace($TargetFolder)) {
-            New-Item `
-                -ItemType Directory `
-                -Path $TargetFolder `
-                -Force | Out-Null
-        }
+    foreach ($Item in $Items) {
+        $Target = Join-Path $Destination $Item.Name
 
         Copy-Item `
-            -LiteralPath $File.FullName `
+            -LiteralPath $Item.FullName `
             -Destination $Target `
-            -Force
+            -Recurse `
+            -Force `
+            -ErrorAction Stop
     }
 }
 
 # ------------------------------------------------------------
-# EXTRACT ZIP TO TEMP DIRECTORY
+# INSTALL HATS BASE
+#
+# HATS releases commonly contain:
+#
+# SdOut/
+#   atmosphere/
+#   bootloader/
+#   switch/
+#   boot.dat
+#   ...
+#
+# We copy the CONTENTS of SdOut into Pack.
+#
+# This prevents:
+#
+# SdOut/atmosphere
+# SdOut/switch
+#
+# from appearing in the final ZIP.
 # ------------------------------------------------------------
 
-function Extract-Zip {
+function Install-HatsBase {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ZipPath,
@@ -286,183 +296,89 @@ function Extract-Zip {
         [string]$Destination
     )
 
-    if (Test-Path $Destination) {
-        Remove-Item $Destination -Recurse -Force
+    $ExtractPath = Join-Path $Work "HATS-Base-Extract"
+
+    if (Test-Path $ExtractPath) {
+        Remove-Item $ExtractPath -Recurse -Force
     }
 
     New-Item `
         -ItemType Directory `
-        -Path $Destination `
+        -Path $ExtractPath `
         -Force | Out-Null
 
-    Write-Host "Extracting ZIP..."
-
-    Expand-Archive `
-        -Path $ZipPath `
-        -DestinationPath $Destination `
-        -Force `
-        -ErrorAction Stop
-}
-
-# ------------------------------------------------------------
-# MERGE ZIP
-#
-# Handles these layouts:
-#
-# 1. atmosphere/...
-# 2. switch/...
-# 3. SdOut/atmosphere/...
-# 4. SdOut/switch/...
-#
-# SdOut is automatically removed from the final structure.
-# ------------------------------------------------------------
-
-function Merge-ZipIntoPack {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ZipPath
-    )
-
-    $ExtractPath = Join-Path `
-        $Work `
-        ("extract_" + [guid]::NewGuid().ToString())
-
-    Extract-Zip `
+    Install-Zip `
         -ZipPath $ZipPath `
         -Destination $ExtractPath
 
-    $RootEntries = @(Get-ChildItem `
-        -Path $ExtractPath `
-        -Force)
+    Write-Host ""
+    Write-Host "Inspecting HATS base..."
 
-    if ($RootEntries.Count -eq 0) {
-        throw "ZIP contains no files: $ZipPath"
-    }
-
-    # --------------------------------------------------------
-    # CASE 1:
-    # ZIP has a single SdOut directory.
-    #
-    # Extract:
-    #   SdOut\atmosphere
-    #   SdOut\switch
-    #
-    # Into:
-    #   pack\atmosphere
-    #   pack\switch
-    # --------------------------------------------------------
-
-    $SdOut = $RootEntries |
+    $SdOut = Get-ChildItem `
+        -LiteralPath $ExtractPath `
+        -Directory `
+        -Recurse `
+        -ErrorAction Stop |
         Where-Object {
-            $_.PSIsContainer -and
             $_.Name -ieq "SdOut"
-        }
+        } |
+        Select-Object -First 1
 
-    if ($SdOut.Count -eq 1) {
+    if ($null -ne $SdOut) {
 
-        Write-Host "Detected SdOut directory."
-        Write-Host "Merging SdOut contents into pack root."
+        Write-Host "Found SdOut:"
+        Write-Host "  $($SdOut.FullName)"
 
-        Merge-Directory `
+        Write-Host "Merging SdOut contents into pack..."
+
+        Merge-DirectoryContents `
             -Source $SdOut.FullName `
-            -Destination $Pack
+            -Destination $Destination
 
         return
     }
 
-    # --------------------------------------------------------
-    # CASE 2:
-    # ZIP has another single wrapper directory.
-    #
-    # Only unwrap it if it contains typical SD-card content.
-    # --------------------------------------------------------
+    # Some HATS releases may already have their SD contents
+    # at the ZIP root. Detect that situation.
 
-    if ($RootEntries.Count -eq 1 -and $RootEntries[0].PSIsContainer) {
+    $RootEntries = @(Get-ChildItem `
+        -LiteralPath $ExtractPath `
+        -Force)
 
-        $Wrapper = $RootEntries[0]
+    $LooksLikeSdRoot = $false
 
-        $WrapperChildren = @(Get-ChildItem `
-            -Path $Wrapper.FullName `
-            -Force)
-
-        $LooksLikeSdRoot = $false
-
-        foreach ($Child in $WrapperChildren) {
-            if (
-                $Child.Name -ieq "atmosphere" -or
-                $Child.Name -ieq "bootloader" -or
-                $Child.Name -ieq "switch" -or
-                $Child.Name -ieq "payload.bin" -or
-                $Child.Name -ieq "boot.dat" -or
-                $Child.Name -ieq "boot.ini" -or
-                $Child.Name -ieq "exosphere.ini" -or
-                $Child.Name -ieq "hekate_ipl.ini"
-            ) {
-                $LooksLikeSdRoot = $true
-                break
-            }
-        }
-
-        if ($LooksLikeSdRoot) {
-
-            Write-Host "Detected wrapper directory: $($Wrapper.Name)"
-            Write-Host "Merging wrapper contents into pack root."
-
-            Merge-Directory `
-                -Source $Wrapper.FullName `
-                -Destination $Pack
-
-            return
+    foreach ($Entry in $RootEntries) {
+        if (
+            $Entry.Name -ieq "atmosphere" -or
+            $Entry.Name -ieq "bootloader" -or
+            $Entry.Name -ieq "switch" -or
+            $Entry.Name -ieq "boot.dat" -or
+            $Entry.Name -ieq "boot.ini" -or
+            $Entry.Name -ieq "payload.bin" -or
+            $Entry.Name -ieq "exosphere.ini" -or
+            $Entry.Name -ieq "manifest.json"
+        ) {
+            $LooksLikeSdRoot = $true
+            break
         }
     }
 
-    # --------------------------------------------------------
-    # CASE 3:
-    # Normal ZIP.
-    # --------------------------------------------------------
+    if ($LooksLikeSdRoot) {
+        Write-Host "HATS archive already contains SD root contents."
+        Write-Host "Merging archive root into pack..."
 
-    Write-Host "Merging ZIP contents into pack root."
+        Merge-DirectoryContents `
+            -Source $ExtractPath `
+            -Destination $Destination
 
-    Merge-Directory `
-        -Source $ExtractPath `
-        -Destination $Pack
-}
-
-# ------------------------------------------------------------
-# INSTALL SINGLE FILE
-# ------------------------------------------------------------
-
-function Install-File {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Source,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Destination
-    )
-
-    $DestinationFolder = Split-Path `
-        $Destination `
-        -Parent
-
-    if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
-        New-Item `
-            -ItemType Directory `
-            -Path $DestinationFolder `
-            -Force | Out-Null
+        return
     }
 
-    Copy-Item `
-        -LiteralPath $Source `
-        -Destination $Destination `
-        -Force `
-        -ErrorAction Stop
-
-    Write-Host "Installed: $Destination"
+    throw "Could not locate the HATS SD contents or SdOut directory."
 }
 
 # ------------------------------------------------------------
-# PROCESS COMPONENTS
+# MAIN BUILD
 # ------------------------------------------------------------
 
 $Index = 0
@@ -478,6 +394,105 @@ foreach ($Component in $Config.components) {
     Write-Host "$($Component.name)"
     Write-Host "========================================"
 
+    if ([string]::IsNullOrWhiteSpace($Component.mode)) {
+        throw "Component '$($Component.name)' has no mode."
+    }
+
+    Write-Host "Mode: $($Component.mode)"
+
+    # --------------------------------------------------------
+    # LOCAL ROOT FILE
+    # --------------------------------------------------------
+
+    if ($Component.mode -eq "local_root") {
+
+        if ([string]::IsNullOrWhiteSpace($Component.source)) {
+            throw "Component '$($Component.name)' has no source."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($Component.destination)) {
+            throw "Component '$($Component.name)' has no destination."
+        }
+
+        $Source = Join-Path $Root $Component.source
+        $Destination = Join-Path $Pack $Component.destination
+
+        Write-Host "Local source:"
+        Write-Host "  $Source"
+
+        if (-not (Test-Path $Source)) {
+            throw "Local file was not found: $Source"
+        }
+
+        Install-File `
+            -Source $Source `
+            -Destination $Destination
+
+        continue
+    }
+
+    # --------------------------------------------------------
+    # HATS BASE
+    # --------------------------------------------------------
+
+    if ($Component.mode -eq "hats_base") {
+
+        if ([string]::IsNullOrWhiteSpace($Component.repo)) {
+            throw "Component '$($Component.name)' has no repository."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($Component.asset_regex)) {
+            throw "Component '$($Component.name)' has no asset_regex."
+        }
+
+        Write-Host "Repository: $($Component.repo)"
+
+        $Release = Get-LatestRelease $Component.repo
+
+        if ($null -eq $Release) {
+            throw "No release information returned for $($Component.repo)"
+        }
+
+        Write-Host "Release: $($Release.tag_name)"
+
+        $Asset = Find-Asset `
+            -Release $Release `
+            -Regex $Component.asset_regex
+
+        if ($null -eq $Asset) {
+
+            Write-Host ""
+            Write-Host "ERROR: No matching HATS asset found." -ForegroundColor Red
+            Write-Host "Required pattern: $($Component.asset_regex)"
+            Write-Host ""
+            Write-Host "Available assets:"
+
+            foreach ($Available in @($Release.assets)) {
+                Write-Host "  $($Available.name)"
+            }
+
+            throw "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
+        }
+
+        Write-Host "Asset: $($Asset.name)"
+
+        $DownloadPath = Join-Path $Work $Asset.name
+
+        Download-Asset `
+            -Asset $Asset `
+            -Destination $DownloadPath
+
+        Install-HatsBase `
+            -ZipPath $DownloadPath `
+            -Destination $Pack
+
+        continue
+    }
+
+    # --------------------------------------------------------
+    # GITHUB COMPONENTS
+    # --------------------------------------------------------
+
     if ([string]::IsNullOrWhiteSpace($Component.repo)) {
         throw "Component '$($Component.name)' has no repository."
     }
@@ -486,12 +501,7 @@ foreach ($Component in $Config.components) {
         throw "Component '$($Component.name)' has no asset_regex."
     }
 
-    if ([string]::IsNullOrWhiteSpace($Component.mode)) {
-        throw "Component '$($Component.name)' has no mode."
-    }
-
     Write-Host "Repository: $($Component.repo)"
-    Write-Host "Mode:       $($Component.mode)"
 
     $Release = Get-LatestRelease $Component.repo
 
@@ -499,7 +509,7 @@ foreach ($Component in $Config.components) {
         throw "No release information returned for $($Component.repo)"
     }
 
-    Write-Host "Release:    $($Release.tag_name)"
+    Write-Host "Release: $($Release.tag_name)"
 
     $Asset = Find-Asset `
         -Release $Release `
@@ -520,51 +530,42 @@ foreach ($Component in $Config.components) {
         throw "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
     }
 
-    Write-Host "Asset:      $($Asset.name)"
+    Write-Host "Asset: $($Asset.name)"
 
     $SafeAssetName = $Asset.name -replace '[\\/:*?"<>|]', '_'
-
-    $DownloadPath = Join-Path `
-        $Work `
-        $SafeAssetName
+    $DownloadPath = Join-Path $Work "$Index-$SafeAssetName"
 
     Download-Asset `
         -Asset $Asset `
         -Destination $DownloadPath
 
-    # --------------------------------------------------------
-    # HATS BASE
-    #
-    # The HATS ZIP is the foundation of the final SD card.
-    # Its SdOut folder is flattened automatically.
-    # --------------------------------------------------------
-
-    switch ($Component.mode.ToLowerInvariant()) {
-
-        "hats_base" {
-
-            if (-not $Asset.name.ToLowerInvariant().EndsWith(".zip")) {
-                throw "HATS Base asset must be a ZIP: $($Asset.name)"
-            }
-
-            Merge-ZipIntoPack `
-                -ZipPath $DownloadPath
-
-            continue
-        }
+    switch ($Component.mode) {
 
         # ----------------------------------------------------
-        # NORMAL ZIP
+        # ZIP
         # ----------------------------------------------------
 
         "zip" {
 
-            if (-not $Asset.name.ToLowerInvariant().EndsWith(".zip")) {
-                throw "Component '$($Component.name)' is mode zip but asset is not a ZIP."
+            $ExtractPath = Join-Path $Work "component-$Index"
+
+            if (Test-Path $ExtractPath) {
+                Remove-Item $ExtractPath -Recurse -Force
             }
 
-            Merge-ZipIntoPack `
-                -ZipPath $DownloadPath
+            New-Item `
+                -ItemType Directory `
+                -Path $ExtractPath `
+                -Force | Out-Null
+
+            Install-Zip `
+                -ZipPath $DownloadPath `
+                -Destination $ExtractPath
+
+            # Merge ZIP contents into the final SD root.
+            Merge-DirectoryContents `
+                -Source $ExtractPath `
+                -Destination $Pack
 
             continue
         }
@@ -642,39 +643,46 @@ foreach ($Component in $Config.components) {
 }
 
 # ------------------------------------------------------------
-# REMOVE EMPTY DIRECTORIES
+# VERIFY LOCAL FILES
 # ------------------------------------------------------------
 
-Get-ChildItem `
-    -Path $Pack `
-    -Directory `
-    -Recurse `
-    -Force |
-    Sort-Object FullName -Descending |
-    ForEach-Object {
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying required local applications"
+Write-Host "========================================"
 
-        $Children = @(Get-ChildItem `
-            -LiteralPath $_.FullName `
-            -Force)
+$RequiredLocalFiles = @(
+    "switch\ftpd.nro",
+    "switch\checkpoint.nro"
+)
 
-        if ($Children.Count -eq 0) {
-            Remove-Item `
-                -LiteralPath $_.FullName `
-                -Force
-        }
+foreach ($RelativePath in $RequiredLocalFiles) {
+
+    $RequiredPath = Join-Path $Pack $RelativePath
+
+    if (-not (Test-Path $RequiredPath)) {
+        throw "Required file missing from final pack: $RelativePath"
     }
 
+    $RequiredFile = Get-Item $RequiredPath
+
+    if ($RequiredFile.Length -le 0) {
+        throw "Required file is empty: $RelativePath"
+    }
+
+    Write-Host "OK: $RelativePath"
+}
+
 # ------------------------------------------------------------
-# VERIFY REQUIRED HATS FILES
+# VERIFY IMPORTANT HATS FILES
 # ------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "Verifying HATS base"
+Write-Host "Verifying HATS base files"
 Write-Host "========================================"
-Write-Host ""
 
-$RequiredFiles = @(
+$ImportantFiles = @(
     "boot.dat",
     "boot.ini",
     "exosphere.ini",
@@ -682,46 +690,48 @@ $RequiredFiles = @(
     "payload.bin"
 )
 
-$MissingRequired = @()
+foreach ($RelativePath in $ImportantFiles) {
 
-foreach ($Required in $RequiredFiles) {
+    $CheckPath = Join-Path $Pack $RelativePath
 
-    $RequiredPath = Join-Path `
-        $Pack `
-        $Required
-
-    if (Test-Path $RequiredPath) {
-        Write-Host "[OK] $Required"
+    if (Test-Path $CheckPath) {
+        Write-Host "OK: $RelativePath"
     }
     else {
-        Write-Host "[MISSING] $Required" -ForegroundColor Yellow
-        $MissingRequired += $Required
+        Write-Host "WARNING: $RelativePath not found"
     }
 }
 
-if ($MissingRequired.Count -gt 0) {
+# ------------------------------------------------------------
+# VERIFY NO SdOut DIRECTORY
+# ------------------------------------------------------------
 
-    Write-Host ""
-    Write-Host "WARNING: Some expected HATS root files are missing:" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Checking for unwanted SdOut directory"
+Write-Host "========================================"
 
-    foreach ($Missing in $MissingRequired) {
-        Write-Host "  $Missing"
+$SdOutDirectories = @(
+    Get-ChildItem `
+        -Path $Pack `
+        -Directory `
+        -Recurse `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -ieq "SdOut"
+        }
+)
+
+if ($SdOutDirectories.Count -gt 0) {
+    foreach ($BadDirectory in $SdOutDirectories) {
+        Write-Host "Removing unwanted SdOut:"
+        Write-Host "  $($BadDirectory.FullName)"
+
+        Remove-Item `
+            $BadDirectory.FullName `
+            -Recurse `
+            -Force
     }
-
-    Write-Host ""
-    Write-Host "The build will continue because upstream HATS may change its root files."
-}
-
-# ------------------------------------------------------------
-# VERIFY NO SDOUT DIRECTORY
-# ------------------------------------------------------------
-
-$SdOutDirectory = Join-Path `
-    $Pack `
-    "SdOut"
-
-if (Test-Path $SdOutDirectory) {
-    throw "Invalid final structure: SdOut directory still exists in pack."
 }
 
 # ------------------------------------------------------------
@@ -732,14 +742,16 @@ Write-Host ""
 Write-Host "========================================"
 Write-Host "Verifying pack"
 Write-Host "========================================"
-Write-Host ""
+
+if (-not (Test-Path $Pack)) {
+    throw "Pack directory does not exist."
+}
 
 $PackFiles = @(
     Get-ChildItem `
         -Path $Pack `
         -Recurse `
-        -File `
-        -Force
+        -File
 )
 
 if ($PackFiles.Count -eq 0) {
@@ -758,9 +770,7 @@ $Output = Join-Path `
     "SkipperBNS-HATS-$Version.zip"
 
 if (Test-Path $Output) {
-    Remove-Item `
-        $Output `
-        -Force
+    Remove-Item $Output -Force
 }
 
 Write-Host "Creating final HATS ZIP..."
@@ -768,7 +778,8 @@ Write-Host "Creating final HATS ZIP..."
 Compress-Archive `
     -Path (Join-Path $Pack "*") `
     -DestinationPath $Output `
-    -Force
+    -Force `
+    -ErrorAction Stop
 
 if (-not (Test-Path $Output)) {
     throw "Final ZIP was not created."
@@ -780,51 +791,20 @@ if ($OutputFile.Length -le 0) {
     throw "Final ZIP is empty."
 }
 
-# ------------------------------------------------------------
-# FINAL STRUCTURE CHECK
-# ------------------------------------------------------------
-
-$ZipCheckPath = Join-Path `
-    $Work `
-    "final_zip_check"
-
-if (Test-Path $ZipCheckPath) {
-    Remove-Item `
-        $ZipCheckPath `
-        -Recurse `
-        -Force
-}
-
-Expand-Archive `
-    -Path $Output `
-    -DestinationPath $ZipCheckPath `
-    -Force
-
-if (Test-Path (Join-Path $ZipCheckPath "SdOut")) {
-    throw "Final ZIP incorrectly contains SdOut directory."
-}
-
 Write-Host ""
 Write-Host "========================================"
 Write-Host "BUILD SUCCESSFUL"
 Write-Host "========================================"
+Write-Host "Output: $($OutputFile.FullName)"
+Write-Host "Size:   $($OutputFile.Length) bytes"
 Write-Host ""
 
-Write-Host "Output:"
-Write-Host $OutputFile.FullName
-
-Write-Host ""
-Write-Host "Size:"
-Write-Host "$($OutputFile.Length) bytes"
-
-Write-Host ""
-Write-Host "Root files:"
-
+Write-Host "Pack contents:"
 Get-ChildItem `
     -Path $Pack `
-    -File `
-    -Force |
-    Select-Object Name, Length |
+    -Recurse `
+    -File |
+    Select-Object FullName, Length |
     Format-Table -AutoSize
 
 Write-Host ""
