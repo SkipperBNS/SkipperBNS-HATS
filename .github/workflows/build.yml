@@ -20,15 +20,18 @@ jobs:
     runs-on: windows-latest
 
     steps:
+
       # ==========================================
       # CHECKOUT
       # ==========================================
+
       - name: Checkout repository
         uses: actions/checkout@v6
 
       # ==========================================
       # BUILD
       # ==========================================
+
       - name: Build HATS pack
         shell: pwsh
         env:
@@ -53,7 +56,6 @@ jobs:
           Write-Host (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN))
           Write-Host ""
 
-          # Determine version
           if ("${{ github.ref_type }}" -eq "tag") {
             $version = "${{ github.ref_name }}"
 
@@ -85,6 +87,7 @@ jobs:
       # ==========================================
       # PREPARE DIST
       # ==========================================
+
       - name: Prepare release files
         shell: pwsh
         run: |
@@ -104,13 +107,15 @@ jobs:
             -Path ".\dist" `
             -Force | Out-Null
 
-          # Find the ZIP created by build.ps1.
-          # Ignore temporary/component ZIPs inside work/.
           $zipFiles = @(
-            Get-ChildItem "." -Filter "*.zip" -File -Recurse |
+            Get-ChildItem "." `
+              -Filter "*.zip" `
+              -File `
+              -Recurse |
             Where-Object {
               $_.FullName -notlike "*\dist\*" -and
               $_.FullName -notlike "*\work\*" -and
+              $_.FullName -notlike "*\pack\*" -and
               $_.Length -gt 0
             }
           )
@@ -119,7 +124,6 @@ jobs:
             throw "No HATS ZIP was produced by build.ps1."
           }
 
-          # The final HATS ZIP should be the newest ZIP.
           $zip = $zipFiles |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
@@ -158,6 +162,7 @@ jobs:
       # ==========================================
       # SHA256
       # ==========================================
+
       - name: Generate SHA256 checksum
         shell: pwsh
         run: |
@@ -172,11 +177,12 @@ jobs:
             Get-ChildItem ".\dist\*.zip" -File
           )
 
-          if ($zipFiles.Count -eq 0) {
-            throw "No ZIP file found in dist."
+          if ($zipFiles.Count -ne 1) {
+            throw "Expected exactly one ZIP file in dist."
           }
 
           $lines = foreach ($file in $zipFiles) {
+
             $hash = (
               Get-FileHash `
                 $file.FullName `
@@ -195,11 +201,10 @@ jobs:
 
           Get-Content ".\dist\SHA256SUMS.txt"
 
-          Write-Host ""
-
       # ==========================================
       # VERIFY
       # ==========================================
+
       - name: Verify release files
         shell: pwsh
         run: |
@@ -222,14 +227,16 @@ jobs:
             throw "Expected exactly one HATS ZIP, found $($zipFiles.Count)."
           }
 
-          foreach ($file in $zipFiles) {
-            Write-Host "ZIP:  $($file.Name)"
-            Write-Host "Size: $($file.Length) bytes"
+          $zip = $zipFiles[0]
 
-            if ($file.Length -le 0) {
-              throw "ZIP is empty."
-            }
+          if ($zip.Length -le 0) {
+            throw "HATS ZIP is empty."
           }
+
+          Write-Host "ZIP:"
+          Write-Host "  $($zip.Name)"
+          Write-Host "  $($zip.Length) bytes"
+          Write-Host ""
 
           if (-not (Test-Path ".\dist\SHA256SUMS.txt")) {
             throw "SHA256SUMS.txt was not created."
@@ -241,9 +248,53 @@ jobs:
             throw "SHA256SUMS.txt is empty."
           }
 
-          Write-Host ""
-          Write-Host "SHA256SUMS.txt:"
+          Write-Host "SHA256:"
           Get-Content ".\dist\SHA256SUMS.txt"
+          Write-Host ""
+
+          # Extract the ZIP to verify its actual contents.
+          $VerifyDir = ".\verify"
+
+          if (Test-Path $VerifyDir) {
+            Remove-Item $VerifyDir -Recurse -Force
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path $VerifyDir `
+            -Force | Out-Null
+
+          Expand-Archive `
+            -Path $zip.FullName `
+            -DestinationPath $VerifyDir `
+            -Force
+
+          $requiredFiles = @(
+            "boot.dat",
+            "boot.ini",
+            "exosphere.ini",
+            "manifest.json",
+            "payload.bin"
+          )
+
+          Write-Host "Checking HATS root files..."
+
+          foreach ($fileName in $requiredFiles) {
+
+            $path = Join-Path $VerifyDir $fileName
+
+            if (-not (Test-Path $path)) {
+              throw "Required HATS file is missing: $fileName"
+            }
+
+            $file = Get-Item $path
+
+            if ($file.Length -le 0) {
+              throw "Required HATS file is empty: $fileName"
+            }
+
+            Write-Host "[OK] $fileName - $($file.Length) bytes"
+          }
 
           Write-Host ""
           Write-Host "=========================================="
@@ -251,8 +302,9 @@ jobs:
           Write-Host "=========================================="
 
       # ==========================================
-      # UPLOAD WORKFLOW ARTIFACT
+      # UPLOAD ARTIFACT
       # ==========================================
+
       - name: Upload HATS build artifact
         uses: actions/upload-artifact@v6
         with:
@@ -263,8 +315,9 @@ jobs:
           if-no-files-found: error
 
       # ==========================================
-      # CREATE GITHUB RELEASE
+      # PUBLISH RELEASE
       # ==========================================
+
       - name: Publish GitHub Release
         if: github.ref_type == 'tag'
         shell: pwsh
@@ -284,7 +337,6 @@ jobs:
           }
 
           $zip = $zipFiles[0]
-
           $checksum = Get-Item ".\dist\SHA256SUMS.txt"
 
           Write-Host "=========================================="
@@ -292,24 +344,17 @@ jobs:
           Write-Host "=========================================="
           Write-Host ""
 
-          Write-Host "Tag:"
-          Write-Host $tag
+          Write-Host "Tag: $tag"
+          Write-Host "ZIP: $($zip.Name)"
+          Write-Host "SHA256: $($checksum.Name)"
           Write-Host ""
 
-          Write-Host "ZIP:"
-          Write-Host $zip.FullName
-          Write-Host ""
-
-          Write-Host "SHA256:"
-          Write-Host $checksum.FullName
-          Write-Host ""
-
-          # Check whether the release already exists.
           gh release view $tag 2>$null
 
           if ($LASTEXITCODE -eq 0) {
+
             Write-Host "Release $tag already exists."
-            Write-Host "Uploading/replacing release assets..."
+            Write-Host "Replacing release assets..."
 
             gh release upload `
               $tag `
@@ -318,6 +363,7 @@ jobs:
               --clobber
           }
           else {
+
             Write-Host "Creating release $tag..."
 
             gh release create `
