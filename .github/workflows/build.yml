@@ -5,7 +5,7 @@ on:
 
   push:
     tags:
-      - "SkipperBNSHats-V*"
+      - "v*"
 
 permissions:
   contents: write
