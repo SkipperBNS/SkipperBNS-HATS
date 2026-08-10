@@ -1,6 +1,6 @@
 name: Build HATS Pack
 
-"on":
+on:
   workflow_dispatch:
   push:
     tags:
@@ -20,6 +20,8 @@ jobs:
 
       - name: Run HATS builder
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -34,6 +36,10 @@ jobs:
           if (-not (Test-Path ".\components.json")) {
             throw "components.json was not found."
           }
+
+          Write-Host ""
+          Write-Host "GitHub token configured: $(-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN))"
+          Write-Host ""
 
           $version = "${{ github.ref_name }}"
 
@@ -53,8 +59,8 @@ jobs:
 
           & ".\scripts\build.ps1" -Version $version
 
-          if (-not $?) {
-            throw "build.ps1 failed."
+          if ($LASTEXITCODE -ne 0) {
+            throw "build.ps1 failed with exit code $LASTEXITCODE"
           }
 
           Write-Host ""
@@ -199,4 +205,4 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.zip
-            dist/SHA256SUMS.txt 
+            dist/SHA256SUMS.txt
