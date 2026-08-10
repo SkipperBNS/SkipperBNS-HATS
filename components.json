@@ -131,10 +131,11 @@
       "mode": "zip"
     },
     {
-      "name": "sys-clk",
+      "name": "sys-clk Overlay",
       "repo": "ppkantorski/sys-clk",
-      "asset_regex": "^sys-clk-.*\\.zip$",
-      "mode": "zip"
+      "asset_regex": "^sys-clk-overlay\\.ovl$",
+      "mode": "ovl",
+      "destination": "switch/.overlays/sys-clk-overlay.ovl"
     }
   ]
 }
