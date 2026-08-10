@@ -509,4 +509,3 @@ Get-ChildItem `
 
 Write-Host ""
 Write-Host "Build completed successfully."
-```
