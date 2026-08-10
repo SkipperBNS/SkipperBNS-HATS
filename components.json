@@ -101,9 +101,8 @@
     {
       "name": "QuickNTP",
       "repo": "nedex/QuickNTP",
-      "asset_regex": ".*\\.ovl$",
-      "mode": "ovl",
-      "destination": "switch/.overlays/QuickNTP.ovl"
+      "asset_regex": "^quickntp-.*\\.zip$",
+      "mode": "zip"
     },
     {
       "name": "Status Monitor Overlay",
