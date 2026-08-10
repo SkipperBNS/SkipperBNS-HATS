@@ -19,13 +19,16 @@ Write-Host "Pack: $Pack"
 Write-Host "Work: $Work"
 Write-Host ""
 
-# Clean previous build
+# ------------------------------------------------------------
+# CLEAN BUILD DIRECTORIES
+# ------------------------------------------------------------
+
 if (Test-Path $Work) {
-    Remove-Item -Path $Work -Recurse -Force
+    Remove-Item $Work -Recurse -Force
 }
 
 if (Test-Path $Pack) {
-    Remove-Item -Path $Pack -Recurse -Force
+    Remove-Item $Pack -Recurse -Force
 }
 
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
@@ -34,13 +37,16 @@ New-Item -ItemType Directory -Path $Pack -Force | Out-Null
 Write-Host "Preparing build directories..."
 Write-Host ""
 
-# Load components.json
+# ------------------------------------------------------------
+# LOAD COMPONENTS.JSON
+# ------------------------------------------------------------
+
 if (-not (Test-Path $ComponentsFile)) {
     throw "components.json was not found: $ComponentsFile"
 }
 
 try {
-    $ConfigText = Get-Content -Path $ComponentsFile -Raw -ErrorAction Stop
+    $ConfigText = Get-Content $ComponentsFile -Raw -ErrorAction Stop
 
     if ([string]::IsNullOrWhiteSpace($ConfigText)) {
         throw "components.json is empty."
@@ -59,17 +65,28 @@ if ($null -eq $Config.components) {
 Write-Host "Components configured: $($Config.components.Count)"
 Write-Host ""
 
-# GitHub API
+# ------------------------------------------------------------
+# GITHUB API
+# ------------------------------------------------------------
+
 $GitHubToken = $env:GITHUB_TOKEN
 
 $Headers = @{
     "User-Agent" = "SkipperBNS-HATS-Builder"
-    "Accept" = "application/vnd.github+json"
+    "Accept"     = "application/vnd.github+json"
 }
 
 if (-not [string]::IsNullOrWhiteSpace($GitHubToken)) {
     $Headers["Authorization"] = "Bearer $GitHubToken"
 }
+
+Write-Host "GitHub authentication:"
+Write-Host "Token configured: $(-not [string]::IsNullOrWhiteSpace($GitHubToken))"
+Write-Host ""
+
+# ------------------------------------------------------------
+# GET LATEST RELEASE
+# ------------------------------------------------------------
 
 function Get-LatestRelease {
     param(
@@ -79,11 +96,15 @@ function Get-LatestRelease {
 
     $Url = "https://api.github.com/repos/$Repo/releases/latest"
 
-    Write-Host "Checking latest release..."
+    Write-Host "Checking latest release for $Repo..."
 
     for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
         try {
-            return Invoke-RestMethod -Uri $Url -Headers $Headers -Method Get -ErrorAction Stop
+            return Invoke-RestMethod `
+                -Uri $Url `
+                -Headers $Headers `
+                -Method Get `
+                -ErrorAction Stop
         }
         catch {
             Write-Host "Release request failed (attempt $Attempt of 3)."
@@ -97,6 +118,10 @@ function Get-LatestRelease {
     }
 }
 
+# ------------------------------------------------------------
+# FIND ASSET
+# ------------------------------------------------------------
+
 function Find-Asset {
     param(
         [Parameter(Mandatory = $true)]
@@ -106,7 +131,7 @@ function Find-Asset {
         [string]$Regex
     )
 
-    foreach ($Asset in $Release.assets) {
+    foreach ($Asset in @($Release.assets)) {
         if ($Asset.name -match $Regex) {
             return $Asset
         }
@@ -114,6 +139,10 @@ function Find-Asset {
 
     return $null
 }
+
+# ------------------------------------------------------------
+# DOWNLOAD ASSET
+# ------------------------------------------------------------
 
 function Download-Asset {
     param(
@@ -125,21 +154,32 @@ function Download-Asset {
     )
 
     Write-Host "Downloading: $($Asset.name)"
+    Write-Host "URL: $($Asset.browser_download_url)"
 
-    Invoke-WebRequest -Uri $Asset.browser_download_url -Headers $Headers -OutFile $Destination -UseBasicParsing -ErrorAction Stop
+    Invoke-WebRequest `
+        -Uri $Asset.browser_download_url `
+        -Headers $Headers `
+        -OutFile $Destination `
+        -UseBasicParsing `
+        -ErrorAction Stop
 
     if (-not (Test-Path $Destination)) {
         throw "Download failed: $Destination"
     }
 
-    $DownloadedFile = Get-Item -LiteralPath $Destination
+    $DownloadedFile = Get-Item $Destination
 
     if ($DownloadedFile.Length -le 0) {
         throw "Downloaded file is empty: $Destination"
     }
 
     Write-Host "Downloaded: $($DownloadedFile.Length) bytes"
+    Write-Host ""
 }
+
+# ------------------------------------------------------------
+# EXTRACT ZIP
+# ------------------------------------------------------------
 
 function Install-Zip {
     param(
@@ -150,10 +190,19 @@ function Install-Zip {
         [string]$Destination
     )
 
-    Write-Host "Extracting ZIP..."
+    Write-Host "Extracting ZIP:"
+    Write-Host $ZipPath
 
-    Expand-Archive -Path $ZipPath -DestinationPath $Destination -Force -ErrorAction Stop
+    Expand-Archive `
+        -Path $ZipPath `
+        -DestinationPath $Destination `
+        -Force `
+        -ErrorAction Stop
 }
+
+# ------------------------------------------------------------
+# COPY FILE
+# ------------------------------------------------------------
 
 function Install-File {
     param(
@@ -164,25 +213,194 @@ function Install-File {
         [string]$Destination
     )
 
-    $DestinationFolder = Split-Path -Path $Destination -Parent
+    $DestinationFolder = Split-Path $Destination -Parent
 
     if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
-        New-Item -ItemType Directory -Path $DestinationFolder -Force | Out-Null
+        New-Item `
+            -ItemType Directory `
+            -Path $DestinationFolder `
+            -Force | Out-Null
     }
 
-    Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+    Copy-Item `
+        -LiteralPath $Source `
+        -Destination $Destination `
+        -Force `
+        -ErrorAction Stop
 
     Write-Host "Installed: $Destination"
 }
 
-# ============================================================
-# Build components
-# ============================================================
+# ------------------------------------------------------------
+# FIND EXTRACTED FILE
+# ------------------------------------------------------------
+
+function Find-ExtractedFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $Matches = @(
+        Get-ChildItem `
+            -Path $Root `
+            -Recurse `
+            -File `
+            -Filter $FileName `
+            -ErrorAction SilentlyContinue
+    )
+
+    if ($Matches.Count -eq 0) {
+        return $null
+    }
+
+    return $Matches[0].FullName
+}
+
+# ------------------------------------------------------------
+# HATS BASE
+# ------------------------------------------------------------
+
+$HatsBase = @(
+    $Config.components |
+    Where-Object {
+        $_.mode -eq "hats_base"
+    }
+)
+
+if ($HatsBase.Count -ne 1) {
+    throw "components.json must contain exactly one component with mode 'hats_base'."
+}
+
+$HatsComponent = $HatsBase[0]
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Installing HATS Base"
+Write-Host "========================================"
+Write-Host ""
+
+if ([string]::IsNullOrWhiteSpace($HatsComponent.repo)) {
+    throw "HATS base has no repository."
+}
+
+if ([string]::IsNullOrWhiteSpace($HatsComponent.asset_regex)) {
+    throw "HATS base has no asset_regex."
+}
+
+$HatsRelease = Get-LatestRelease $HatsComponent.repo
+
+if ($null -eq $HatsRelease) {
+    throw "No HATS release information returned."
+}
+
+Write-Host "HATS release: $($HatsRelease.tag_name)"
+Write-Host ""
+
+$HatsAsset = Find-Asset `
+    -Release $HatsRelease `
+    -Regex $HatsComponent.asset_regex
+
+if ($null -eq $HatsAsset) {
+
+    Write-Host "Available HATS assets:"
+    foreach ($Available in @($HatsRelease.assets)) {
+        Write-Host "  $($Available.name)"
+    }
+
+    throw "Could not find the HATS base ZIP."
+}
+
+Write-Host "HATS base asset: $($HatsAsset.name)"
+Write-Host ""
+
+$HatsZip = Join-Path $Work $HatsAsset.name
+
+Download-Asset `
+    -Asset $HatsAsset `
+    -Destination $HatsZip
+
+$HatsExtract = Join-Path $Work "hats-base"
+
+New-Item `
+    -ItemType Directory `
+    -Path $HatsExtract `
+    -Force | Out-Null
+
+Install-Zip `
+    -ZipPath $HatsZip `
+    -Destination $HatsExtract
+
+Write-Host "Installing HATS base files..."
+
+# The HATS release may contain files directly at its root
+# or inside a single top-level directory.
+$RootCandidates = @(
+    $HatsExtract
+)
+
+$Directories = @(
+    Get-ChildItem `
+        -Path $HatsExtract `
+        -Directory `
+        -ErrorAction SilentlyContinue
+)
+
+if ($Directories.Count -eq 1) {
+    $RootCandidates += $Directories[0].FullName
+}
+
+$HatsRoot = $null
+
+foreach ($Candidate in $RootCandidates) {
+
+    $HasBootFile = Test-Path (Join-Path $Candidate "boot.dat")
+    $HasManifest = Test-Path (Join-Path $Candidate "manifest.json")
+
+    if ($HasBootFile -or $HasManifest) {
+        $HatsRoot = $Candidate
+        break
+    }
+}
+
+if ($null -eq $HatsRoot) {
+    $HatsRoot = $HatsExtract
+}
+
+Write-Host "HATS base root:"
+Write-Host $HatsRoot
+Write-Host ""
+
+# Copy all HATS base files into pack.
+Copy-Item `
+    -Path (Join-Path $HatsRoot "*") `
+    -Destination $Pack `
+    -Recurse `
+    -Force `
+    -ErrorAction Stop
+
+Write-Host "HATS base installed."
+Write-Host ""
+
+# ------------------------------------------------------------
+# COMPONENT INSTALLATION
+# ------------------------------------------------------------
 
 $Index = 0
-$Total = $Config.components.Count
 
-foreach ($Component in $Config.components) {
+$ComponentsToInstall = @(
+    $Config.components |
+    Where-Object {
+        $_.mode -ne "hats_base"
+    }
+)
+
+$Total = $ComponentsToInstall.Count
+
+foreach ($Component in $ComponentsToInstall) {
 
     $Index++
 
@@ -200,14 +418,10 @@ foreach ($Component in $Config.components) {
         throw "Component '$($Component.name)' has no asset_regex."
     }
 
-    if ([string]::IsNullOrWhiteSpace($Component.mode)) {
-        throw "Component '$($Component.name)' has no mode."
-    }
-
     Write-Host "Repository: $($Component.repo)"
     Write-Host "Mode: $($Component.mode)"
 
-    $Release = Get-LatestRelease -Repo $Component.repo
+    $Release = Get-LatestRelease $Component.repo
 
     if ($null -eq $Release) {
         throw "No release information returned for $($Component.repo)"
@@ -215,9 +429,9 @@ foreach ($Component in $Config.components) {
 
     Write-Host "Release: $($Release.tag_name)"
 
-    # IMPORTANT:
-    # Use the function with normal PowerShell syntax.
-    $Asset = Find-Asset -Release $Release -Regex $Component.asset_regex
+    $Asset = Find-Asset `
+        -Release $Release `
+        -Regex $Component.asset_regex
 
     if ($null -eq $Asset) {
 
@@ -227,7 +441,7 @@ foreach ($Component in $Config.components) {
         Write-Host ""
         Write-Host "Available assets:"
 
-        foreach ($Available in $Release.assets) {
+        foreach ($Available in @($Release.assets)) {
             Write-Host "  $($Available.name)"
         }
 
@@ -236,17 +450,21 @@ foreach ($Component in $Config.components) {
 
     Write-Host "Asset: $($Asset.name)"
 
-    # Prevent unsafe/problematic asset names from becoming directories
-    $SafeAssetName = Split-Path -Path $Asset.name -Leaf
-    $DownloadPath = Join-Path $Work $SafeAssetName
+    $DownloadPath = Join-Path $Work $Asset.name
 
-    Download-Asset -Asset $Asset -Destination $DownloadPath
+    Download-Asset `
+        -Asset $Asset `
+        -Destination $DownloadPath
 
     switch ($Component.mode) {
 
         "zip" {
 
-            Install-Zip -ZipPath $DownloadPath -Destination $Pack
+            Install-Zip `
+                -ZipPath $DownloadPath `
+                -Destination $Pack
+
+            continue
         }
 
         "nro" {
@@ -255,9 +473,15 @@ foreach ($Component in $Config.components) {
                 throw "Component '$($Component.name)' has no destination."
             }
 
-            $Destination = Join-Path $Pack $Component.destination
+            $Destination = Join-Path `
+                $Pack `
+                $Component.destination
 
-            Install-File -Source $DownloadPath -Destination $Destination
+            Install-File `
+                -Source $DownloadPath `
+                -Destination $Destination
+
+            continue
         }
 
         "ovl" {
@@ -266,13 +490,18 @@ foreach ($Component in $Config.components) {
                 throw "Component '$($Component.name)' has no destination."
             }
 
-            # Always place overlays under:
-            # switch/.overlays/
-            $OverlayDestination = $Component.destination -replace '^switch[\\/]\.overlays[\\/]', 'switch\.overlays\'
+            $OverlayDestination = $Component.destination `
+                -replace '^switch[\\/]\.overlays[\\/]', 'switch\.overlays\'
 
-            $Destination = Join-Path $Pack $OverlayDestination
+            $Destination = Join-Path `
+                $Pack `
+                $OverlayDestination
 
-            Install-File -Source $DownloadPath -Destination $Destination
+            Install-File `
+                -Source $DownloadPath `
+                -Destination $Destination
+
+            continue
         }
 
         "file" {
@@ -281,9 +510,15 @@ foreach ($Component in $Config.components) {
                 throw "Component '$($Component.name)' has no destination."
             }
 
-            $Destination = Join-Path $Pack $Component.destination
+            $Destination = Join-Path `
+                $Pack `
+                $Component.destination
 
-            Install-File -Source $DownloadPath -Destination $Destination
+            Install-File `
+                -Source $DownloadPath `
+                -Destination $Destination
+
+            continue
         }
 
         default {
@@ -292,20 +527,96 @@ foreach ($Component in $Config.components) {
     }
 }
 
-# ============================================================
-# Verify pack
-# ============================================================
+# ------------------------------------------------------------
+# VERIFY REQUIRED HATS ROOT FILES
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying HATS root files"
+Write-Host "========================================"
+Write-Host ""
+
+$RequiredRootFiles = @(
+    "boot.dat",
+    "boot.ini",
+    "exosphere.ini",
+    "manifest.json",
+    "payload.bin"
+)
+
+$MissingRootFiles = @()
+
+foreach ($FileName in $RequiredRootFiles) {
+
+    $Path = Join-Path $Pack $FileName
+
+    if (Test-Path $Path) {
+        $File = Get-Item $Path
+
+        if ($File.Length -gt 0) {
+            Write-Host "[OK] $FileName - $($File.Length) bytes"
+        }
+        else {
+            Write-Host "[ERROR] $FileName is empty" -ForegroundColor Red
+            $MissingRootFiles += $FileName
+        }
+    }
+    else {
+        Write-Host "[MISSING] $FileName" -ForegroundColor Red
+        $MissingRootFiles += $FileName
+    }
+}
+
+if ($MissingRootFiles.Count -gt 0) {
+    throw "HATS base is missing required root files: $($MissingRootFiles -join ', ')"
+}
+
+# ------------------------------------------------------------
+# VERIFY IMPORTANT DIRECTORIES
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "Verifying directories..."
+
+$RequiredDirectories = @(
+    "atmosphere",
+    "bootloader",
+    "switch"
+)
+
+foreach ($Directory in $RequiredDirectories) {
+
+    $Path = Join-Path $Pack $Directory
+
+    if (Test-Path $Path -PathType Container) {
+        Write-Host "[OK] $Directory/"
+    }
+    else {
+        Write-Host "[WARNING] $Directory/ not found" -ForegroundColor Yellow
+    }
+}
+
+# ------------------------------------------------------------
+# VERIFY PACK
+# ------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
 Write-Host "Verifying pack"
 Write-Host "========================================"
+Write-Host ""
 
 if (-not (Test-Path $Pack)) {
     throw "Pack directory does not exist."
 }
 
-$PackFiles = @(Get-ChildItem -Path $Pack -Recurse -File)
+$PackFiles = @(
+    Get-ChildItem `
+        -Path $Pack `
+        -Recurse `
+        -File
+)
 
 if ($PackFiles.Count -eq 0) {
     throw "Pack directory is empty."
@@ -314,29 +625,39 @@ if ($PackFiles.Count -eq 0) {
 Write-Host "Files in pack: $($PackFiles.Count)"
 Write-Host ""
 
-# ============================================================
-# Create final ZIP
-# ============================================================
+# ------------------------------------------------------------
+# CREATE FINAL ZIP
+# ------------------------------------------------------------
 
-$Output = Join-Path $Root "SkipperBNS-HATS-$Version.zip"
+$Output = Join-Path `
+    $Root `
+    "SkipperBNS-HATS-$Version.zip"
 
 if (Test-Path $Output) {
-    Remove-Item -Path $Output -Force
+    Remove-Item $Output -Force
 }
 
 Write-Host "Creating final HATS ZIP..."
 
-Compress-Archive -Path (Join-Path $Pack "*") -DestinationPath $Output -Force
+Compress-Archive `
+    -Path (Join-Path $Pack "*") `
+    -DestinationPath $Output `
+    -Force `
+    -ErrorAction Stop
 
 if (-not (Test-Path $Output)) {
     throw "Final ZIP was not created."
 }
 
-$OutputFile = Get-Item -LiteralPath $Output
+$OutputFile = Get-Item $Output
 
 if ($OutputFile.Length -le 0) {
     throw "Final ZIP is empty."
 }
+
+# ------------------------------------------------------------
+# FINAL SUMMARY
+# ------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
@@ -346,9 +667,17 @@ Write-Host "Output: $($OutputFile.FullName)"
 Write-Host "Size:   $($OutputFile.Length) bytes"
 Write-Host ""
 
-Write-Host "Pack contents:"
+Write-Host "Required HATS root files:"
+foreach ($FileName in $RequiredRootFiles) {
+    Write-Host "  [OK] $FileName"
+}
 
-Get-ChildItem -Path $Pack -Recurse -File |
+Write-Host ""
+Write-Host "Pack contents:"
+Get-ChildItem `
+    -Path $Pack `
+    -Recurse `
+    -File |
     Select-Object FullName, Length |
     Format-Table -AutoSize
 
