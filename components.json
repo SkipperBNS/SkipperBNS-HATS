@@ -3,6 +3,12 @@
   "version": "1.0.0",
   "components": [
     {
+      "name": "HATS Base",
+      "repo": "sthetix/HATS",
+      "asset_regex": "(?i)^HATS.*\\.zip$",
+      "mode": "hats_base"
+    },
+    {
       "name": "Atmosphere",
       "repo": "Atmosphere-NX/Atmosphere",
       "asset_regex": "^atmosphere-.*\\.zip$",
@@ -38,7 +44,7 @@
     {
       "name": "HATS-Tools",
       "repo": "sthetix/HATS-Tools",
-      "asset_regex": "^hats-tools-.*\\.zip$",
+      "asset_regex": ".*\\.zip$",
       "mode": "zip"
     },
     {
@@ -69,32 +75,32 @@
     {
       "name": "MissionControl",
       "repo": "ndeadly/MissionControl",
-      "asset_regex": "^MissionControl-.*\\.zip$",
+      "asset_regex": ".*\\.zip$",
       "mode": "zip"
     },
     {
       "name": "SaltyNX",
       "repo": "masagrator/SaltyNX",
-      "asset_regex": "^SaltyNX\\.zip$",
+      "asset_regex": ".*\\.zip$",
       "mode": "zip"
     },
     {
       "name": "nx-ovlloader",
       "repo": "ppkantorski/nx-ovlloader",
-      "asset_regex": "^nx-ovlloader\\.zip$",
+      "asset_regex": ".*\\.zip$",
       "mode": "zip"
     },
     {
       "name": "EdiZon Overlay",
       "repo": "proferabg/EdiZon-Overlay",
-      "asset_regex": "^ovlEdiZon\\.ovl$",
+      "asset_regex": ".*\\.ovl$",
       "mode": "ovl",
       "destination": "switch/.overlays/EdiZon.ovl"
     },
     {
       "name": "FPSLocker",
       "repo": "masagrator/FPSLocker",
-      "asset_regex": "^FPSLocker\\.ovl$",
+      "asset_regex": ".*\\.ovl$",
       "mode": "ovl",
       "destination": "switch/.overlays/FPSLocker.ovl"
     },
@@ -120,7 +126,7 @@
     {
       "name": "Ultrahand Overlay",
       "repo": "ppkantorski/Ultrahand-Overlay",
-      "asset_regex": "^ovlmenu\\.ovl$",
+      "asset_regex": ".*\\.ovl$",
       "mode": "ovl",
       "destination": "switch/.overlays/ovlmenu.ovl"
     },
