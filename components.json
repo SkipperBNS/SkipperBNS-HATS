@@ -57,9 +57,8 @@
     {
       "name": "Tinwoo Installer",
       "repo": "mrdude2478/Tinwoo-Release",
-      "asset_regex": ".*\\.nro$",
-      "mode": "nro",
-      "destination": "switch/Tinwoo.nro"
+      "asset_regex": "^Tinwoo-Installer\\.zip$",
+      "mode": "zip"
     },
     {
       "name": "Linkalho",
