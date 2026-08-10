@@ -47,11 +47,12 @@ jobs:
           )
 
           foreach ($path in $files) {
-            if (-not (Test-Path $path)) {
+
+            if (-not (Test-Path -LiteralPath $path)) {
               throw "Required local file was not found: $path"
             }
 
-            $file = Get-Item $path
+            $file = Get-Item -LiteralPath $path
 
             if ($file.Length -le 0) {
               throw "Local file is empty: $path"
@@ -61,8 +62,11 @@ jobs:
             Write-Host "Size: $($file.Length) bytes"
           }
 
+          Write-Host ""
+          Write-Host "Local applications verified successfully."
+
       # ==========================================
-      # BUILD HATS
+      # BUILD HATS PACK
       # ==========================================
 
       - name: Build HATS pack
@@ -75,29 +79,73 @@ jobs:
           Write-Host "=========================================="
           Write-Host " SkipperBNS HATS Pack Builder"
           Write-Host "=========================================="
+          Write-Host ""
 
-          if (-not (Test-Path ".\scripts\build.ps1")) {
+          if (-not (Test-Path -LiteralPath ".\scripts\build.ps1")) {
             throw "scripts/build.ps1 was not found."
           }
 
-          if (-not (Test-Path ".\components.json")) {
+          if (-not (Test-Path -LiteralPath ".\components.json")) {
             throw "components.json was not found."
           }
 
           Write-Host "Build version: main"
           Write-Host ""
+          Write-Host "Running build.ps1..."
+          Write-Host ""
 
-          & ".\scripts\build.ps1" -Version "main"
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "build.ps1 failed with exit code $LASTEXITCODE"
+          try {
+            & ".\scripts\build.ps1" -Version "main"
+          }
+          catch {
+            Write-Host ""
+            Write-Host "=========================================="
+            Write-Host " BUILD FAILED"
+            Write-Host "=========================================="
+            Write-Host ""
+            Write-Host $_.Exception.Message
+            throw
           }
 
           Write-Host ""
-          Write-Host "Build completed successfully."
+          Write-Host "=========================================="
+          Write-Host " build.ps1 completed successfully"
+          Write-Host "=========================================="
+
+          # ------------------------------------------
+          # FIND GENERATED ZIP
+          # ------------------------------------------
+
+          $zipFiles = @(
+            Get-ChildItem `
+              -Path "." `
+              -Filter "*.zip" `
+              -File `
+              -Recurse |
+            Where-Object {
+              $_.FullName -notlike "*\dist\*" -and
+              $_.FullName -notlike "*\work\*" -and
+              $_.Length -gt 0
+            }
+          )
+
+          if ($zipFiles.Count -eq 0) {
+            throw "build.ps1 completed but did not produce a HATS ZIP."
+          }
+
+          Write-Host ""
+          Write-Host "HATS ZIP produced:"
+
+          foreach ($zip in $zipFiles) {
+            Write-Host "  $($zip.FullName)"
+            Write-Host "  $($zip.Length) bytes"
+          }
+
+          Write-Host ""
+          Write-Host "Build verification successful."
 
       # ==========================================
-      # PREPARE RELEASE ZIP
+      # PREPARE RELEASE FILES
       # ==========================================
 
       - name: Prepare release files
@@ -109,8 +157,11 @@ jobs:
           Write-Host " Preparing release files"
           Write-Host "=========================================="
 
-          if (Test-Path ".\dist") {
-            Remove-Item ".\dist" -Recurse -Force
+          if (Test-Path -LiteralPath ".\dist") {
+            Remove-Item `
+              -LiteralPath ".\dist" `
+              -Recurse `
+              -Force
           }
 
           New-Item `
@@ -119,7 +170,11 @@ jobs:
             -Force | Out-Null
 
           $zipFiles = @(
-            Get-ChildItem "." -Filter "*.zip" -File -Recurse |
+            Get-ChildItem `
+              -Path "." `
+              -Filter "*.zip" `
+              -File `
+              -Recurse |
             Where-Object {
               $_.FullName -notlike "*\dist\*" -and
               $_.FullName -notlike "*\work\*" -and
@@ -128,16 +183,18 @@ jobs:
           )
 
           if ($zipFiles.Count -eq 0) {
-            throw "No HATS ZIP was produced."
+            throw "No HATS ZIP was produced by build.ps1."
           }
 
           $zip = $zipFiles |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
-          Write-Host "Found:"
+          Write-Host ""
+          Write-Host "Selected HATS ZIP:"
           Write-Host $zip.FullName
           Write-Host "Size: $($zip.Length) bytes"
+          Write-Host ""
 
           $destination = ".\dist\SkipperBNS-HATS-main.zip"
 
@@ -146,13 +203,19 @@ jobs:
             -Destination $destination `
             -Force
 
-          if (-not (Test-Path $destination)) {
-            throw "Failed to create release ZIP."
+          if (-not (Test-Path -LiteralPath $destination)) {
+            throw "Failed to copy HATS ZIP into dist."
           }
 
-          Write-Host ""
-          Write-Host "Release ZIP created:"
-          Write-Host $destination
+          $copied = Get-Item -LiteralPath $destination
+
+          if ($copied.Length -le 0) {
+            throw "Copied HATS ZIP is empty."
+          }
+
+          Write-Host "Release ZIP:"
+          Write-Host $copied.FullName
+          Write-Host "Size: $($copied.Length) bytes"
 
       # ==========================================
       # SHA256
@@ -163,49 +226,63 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host " Generating SHA256 checksum"
+          Write-Host "=========================================="
+
           $zipPath = ".\dist\SkipperBNS-HATS-main.zip"
 
-          if (-not (Test-Path $zipPath)) {
-            throw "Release ZIP was not found."
+          if (-not (Test-Path -LiteralPath $zipPath)) {
+            throw "SkipperBNS-HATS-main.zip was not found."
           }
+
+          $zip = Get-Item -LiteralPath $zipPath
 
           $hash = (
             Get-FileHash `
-              $zipPath `
+              -LiteralPath $zip.FullName `
               -Algorithm SHA256
           ).Hash
 
-          "$hash  SkipperBNS-HATS-main.zip" |
+          "$hash  $($zip.Name)" |
             Out-File `
-              ".\dist\SHA256SUMS.txt" `
+              -FilePath ".\dist\SHA256SUMS.txt" `
               -Encoding utf8
 
           Write-Host ""
           Write-Host "SHA256:"
           Write-Host $hash
+          Write-Host ""
+
+          Write-Host "SHA256SUMS.txt:"
+          Get-Content ".\dist\SHA256SUMS.txt"
 
       # ==========================================
-      # VERIFY
+      # VERIFY RELEASE
       # ==========================================
 
-      - name: Verify release files
+      - name: Verify release
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host " Verifying release"
+          Write-Host "=========================================="
+
           $zipPath = ".\dist\SkipperBNS-HATS-main.zip"
           $shaPath = ".\dist\SHA256SUMS.txt"
 
-          if (-not (Test-Path $zipPath)) {
+          if (-not (Test-Path -LiteralPath $zipPath)) {
             throw "HATS ZIP was not found."
           }
 
-          if (-not (Test-Path $shaPath)) {
+          if (-not (Test-Path -LiteralPath $shaPath)) {
             throw "SHA256SUMS.txt was not found."
           }
 
-          $zip = Get-Item $zipPath
-          $sha = Get-Item $shaPath
+          $zip = Get-Item -LiteralPath $zipPath
+          $sha = Get-Item -LiteralPath $shaPath
 
           if ($zip.Length -le 0) {
             throw "HATS ZIP is empty."
@@ -216,18 +293,21 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "=========================================="
-          Write-Host " RELEASE FILES VERIFIED"
-          Write-Host "=========================================="
-
-          Write-Host "ZIP: $($zip.Name)"
-          Write-Host "Size: $($zip.Length) bytes"
+          Write-Host "ZIP:"
+          Write-Host "  $($zip.Name)"
+          Write-Host "  $($zip.Length) bytes"
 
           Write-Host ""
-          Get-Content $shaPath
+          Write-Host "SHA256:"
+          Get-Content -LiteralPath $shaPath
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " BUILD VERIFIED SUCCESSFULLY"
+          Write-Host "=========================================="
 
       # ==========================================
-      # UPLOAD ARTIFACT
+      # UPLOAD ACTION ARTIFACT
       # ==========================================
 
       - name: Upload HATS build artifact
@@ -240,7 +320,7 @@ jobs:
           if-no-files-found: error
 
       # ==========================================
-      # CREATE / REPLACE MAIN RELEASE
+      # CREATE / UPDATE MAIN RELEASE
       # ==========================================
 
       - name: Publish HATS Release
@@ -256,22 +336,34 @@ jobs:
           $shaPath = ".\dist\SHA256SUMS.txt"
 
           Write-Host "=========================================="
-          Write-Host " Publishing SkipperBNS HATS"
+          Write-Host " Publishing SkipperBNS HATS Release"
           Write-Host "=========================================="
-
           Write-Host ""
+
+          if (-not (Test-Path -LiteralPath $zipPath)) {
+            throw "Release ZIP was not found."
+          }
+
+          if (-not (Test-Path -LiteralPath $shaPath)) {
+            throw "SHA256SUMS.txt was not found."
+          }
+
           Write-Host "Release tag: $tag"
           Write-Host "ZIP: $zipPath"
           Write-Host "SHA256: $shaPath"
           Write-Host ""
 
-          # Check whether the release already exists.
+          # ------------------------------------------
+          # CHECK EXISTING RELEASE
+          # ------------------------------------------
+
           gh release view $tag 2>$null
 
           if ($LASTEXITCODE -eq 0) {
 
             Write-Host "Release '$tag' already exists."
             Write-Host "Replacing existing assets..."
+            Write-Host ""
 
             gh release upload `
               $tag `
@@ -284,13 +376,14 @@ jobs:
             }
 
             Write-Host ""
-            Write-Host "Existing release updated successfully."
+            Write-Host "Release assets replaced successfully."
 
           }
           else {
 
             Write-Host "Release '$tag' does not exist."
             Write-Host "Creating release..."
+            Write-Host ""
 
             gh release create `
               $tag `
@@ -309,7 +402,8 @@ jobs:
 
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host " RELEASE UPDATED SUCCESSFULLY"
+          Write-Host " RELEASE PUBLISHED SUCCESSFULLY"
           Write-Host "=========================================="
+          Write-Host ""
 
           gh release view $tag
