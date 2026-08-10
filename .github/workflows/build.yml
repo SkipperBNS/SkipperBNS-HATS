@@ -115,10 +115,15 @@ jobs:
           Write-Host "Running build.ps1..."
           Write-Host ""
 
-          & ".\scripts\build.ps1" -Version $version
+          try {
+            & ".\scripts\build.ps1" -Version $version
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "build.ps1 failed with exit code $LASTEXITCODE"
+            if (-not $?) {
+              throw "build.ps1 reported a failure."
+            }
+          }
+          catch {
+            throw "build.ps1 failed: $($_.Exception.Message)"
           }
 
           Write-Host ""
