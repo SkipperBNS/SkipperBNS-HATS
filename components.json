@@ -63,9 +63,8 @@
     {
       "name": "Linkalho",
       "repo": "impeeza/linkalho",
-      "asset_regex": ".*\\.nro$",
-      "mode": "nro",
-      "destination": "switch/linkalho.nro"
+      "asset_regex": "^linkalho-.*\\.zip$",
+      "mode": "zip"
     },
     {
       "name": "MissionControl",
