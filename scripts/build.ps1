@@ -9,6 +9,10 @@ Write-Host "       SkipperBNS HATS Pack Builder"
 Write-Host "========================================"
 Write-Host ""
 
+# ------------------------------------------------------------
+# PATHS
+# ------------------------------------------------------------
+
 $Root = Split-Path -Parent $PSScriptRoot
 $Pack = Join-Path $Root "pack"
 $Work = Join-Path $Root "work"
@@ -23,6 +27,8 @@ Write-Host ""
 # CLEAN BUILD DIRECTORIES
 # ------------------------------------------------------------
 
+Write-Host "Cleaning previous build..."
+
 if (Test-Path $Work) {
     Remove-Item $Work -Recurse -Force
 }
@@ -33,6 +39,9 @@ if (Test-Path $Pack) {
 
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 New-Item -ItemType Directory -Path $Pack -Force | Out-Null
+
+Write-Host "Build directories ready."
+Write-Host ""
 
 # ------------------------------------------------------------
 # CHECK COMPONENTS
@@ -98,6 +107,7 @@ function Get-LatestRelease {
     Write-Host "Checking latest release..."
 
     for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+
         try {
             return Invoke-RestMethod `
                 -Uri $Url `
@@ -106,6 +116,7 @@ function Get-LatestRelease {
                 -ErrorAction Stop
         }
         catch {
+
             Write-Host "Release request failed (attempt $Attempt of 3)."
 
             if ($Attempt -eq 3) {
@@ -131,6 +142,7 @@ function Find-Asset {
     )
 
     foreach ($Asset in @($Release.assets)) {
+
         if ($Asset.name -match $Regex) {
             return $Asset
         }
@@ -140,7 +152,7 @@ function Find-Asset {
 }
 
 # ------------------------------------------------------------
-# DOWNLOAD
+# DOWNLOAD ASSET
 # ------------------------------------------------------------
 
 function Download-Asset {
@@ -213,6 +225,7 @@ function Install-File {
     $DestinationFolder = Split-Path $Destination -Parent
 
     if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
+
         New-Item `
             -ItemType Directory `
             -Path $DestinationFolder `
@@ -242,7 +255,7 @@ function Merge-DirectoryContents {
         [string]$Destination
     )
 
-    if (-not (Test-Path $Source)) {
+    if (-not (Test-Path $Source -PathType Container)) {
         throw "Source directory does not exist: $Source"
     }
 
@@ -251,17 +264,40 @@ function Merge-DirectoryContents {
         -Path $Destination `
         -Force | Out-Null
 
-    $Items = Get-ChildItem -LiteralPath $Source -Force
+    $Items = @(Get-ChildItem -LiteralPath $Source -Force)
 
     foreach ($Item in $Items) {
+
         $Target = Join-Path $Destination $Item.Name
 
-        Copy-Item `
-            -LiteralPath $Item.FullName `
-            -Destination $Target `
-            -Recurse `
-            -Force `
-            -ErrorAction Stop
+        if ($Item.PSIsContainer) {
+
+            if (Test-Path $Target -PathType Container) {
+
+                Merge-DirectoryContents `
+                    -Source $Item.FullName `
+                    -Destination $Target
+            }
+            else {
+
+                New-Item `
+                    -ItemType Directory `
+                    -Path $Target `
+                    -Force | Out-Null
+
+                Merge-DirectoryContents `
+                    -Source $Item.FullName `
+                    -Destination $Target
+            }
+        }
+        else {
+
+            Copy-Item `
+                -LiteralPath $Item.FullName `
+                -Destination $Target `
+                -Force `
+                -ErrorAction Stop
+        }
     }
 }
 
@@ -296,7 +332,10 @@ function Install-HatsBase {
     Write-Host ""
     Write-Host "Inspecting HATS base..."
 
-    # Look for SdOut anywhere inside the archive.
+    # --------------------------------------------------------
+    # LOOK FOR SdOut
+    # --------------------------------------------------------
+
     $SdOut = Get-ChildItem `
         -LiteralPath $ExtractPath `
         -Directory `
@@ -321,7 +360,10 @@ function Install-HatsBase {
         return
     }
 
-    # Some HATS releases have SD contents directly at root.
+    # --------------------------------------------------------
+    # CHECK IF ARCHIVE ROOT IS ALREADY SD ROOT
+    # --------------------------------------------------------
+
     $RootEntries = @(
         Get-ChildItem `
             -LiteralPath $ExtractPath `
@@ -342,6 +384,7 @@ function Install-HatsBase {
             $Entry.Name -ieq "exosphere.ini" -or
             $Entry.Name -ieq "manifest.json"
         ) {
+
             $LooksLikeSdRoot = $true
             break
         }
@@ -360,6 +403,150 @@ function Install-HatsBase {
     }
 
     throw "Could not locate the HATS SD contents or SdOut directory."
+}
+
+# ------------------------------------------------------------
+# NORMALIZE NESTED BOOTLOADER
+# ------------------------------------------------------------
+
+function Normalize-Bootloader {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Normalizing bootloader structure"
+    Write-Host "========================================"
+
+    $Bootloader = Join-Path $Pack "bootloader"
+
+    if (-not (Test-Path $Bootloader -PathType Container)) {
+
+        Write-Host "No bootloader directory found."
+        return
+    }
+
+    while ($true) {
+
+        $NestedBootloader = Join-Path $Bootloader "bootloader"
+
+        if (-not (Test-Path $NestedBootloader -PathType Container)) {
+            break
+        }
+
+        Write-Host "Found nested bootloader:"
+        Write-Host "  $NestedBootloader"
+
+        $Items = @(Get-ChildItem -LiteralPath $NestedBootloader -Force)
+
+        foreach ($Item in $Items) {
+
+            $Target = Join-Path $Bootloader $Item.Name
+
+            if ($Item.PSIsContainer) {
+
+                if (Test-Path $Target -PathType Container) {
+
+                    Write-Host "Merging directory:"
+                    Write-Host "  $($Item.Name)"
+
+                    Merge-DirectoryContents `
+                        -Source $Item.FullName `
+                        -Destination $Target
+
+                    Remove-Item `
+                        -LiteralPath $Item.FullName `
+                        -Recurse `
+                        -Force
+                }
+                else {
+
+                    Write-Host "Moving directory:"
+                    Write-Host "  $($Item.Name)"
+
+                    Move-Item `
+                        -LiteralPath $Item.FullName `
+                        -Destination $Target `
+                        -Force `
+                        -ErrorAction Stop
+                }
+            }
+            else {
+
+                Write-Host "Moving file:"
+                Write-Host "  $($Item.Name)"
+
+                Copy-Item `
+                    -LiteralPath $Item.FullName `
+                    -Destination $Target `
+                    -Force `
+                    -ErrorAction Stop
+
+                Remove-Item `
+                    -LiteralPath $Item.FullName `
+                    -Force
+            }
+        }
+
+        if (Test-Path $NestedBootloader) {
+
+            Remove-Item `
+                -LiteralPath $NestedBootloader `
+                -Recurse `
+                -Force
+        }
+    }
+
+    Write-Host "Bootloader structure is clean."
+}
+
+# ------------------------------------------------------------
+# REMOVE SdOut DIRECTORIES
+# ------------------------------------------------------------
+
+function Remove-SdOutDirectories {
+
+    Write-Host ""
+    Write-Host "Checking for unwanted SdOut directories..."
+
+    $SdOutDirectories = @(
+        Get-ChildItem `
+            -Path $Pack `
+            -Directory `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -ieq "SdOut"
+            }
+    )
+
+    foreach ($Directory in $SdOutDirectories) {
+
+        Write-Host "Removing:"
+        Write-Host "  $($Directory.FullName)"
+
+        Remove-Item `
+            -LiteralPath $Directory.FullName `
+            -Recurse `
+            -Force
+    }
+
+    if ($SdOutDirectories.Count -eq 0) {
+        Write-Host "No unwanted SdOut directories found."
+    }
+}
+
+# ------------------------------------------------------------
+# VERIFY NO NESTED BOOTLOADER
+# ------------------------------------------------------------
+
+function Verify-Bootloader {
+
+    $NestedBootloader = Join-Path $Pack "bootloader\bootloader"
+
+    if (Test-Path $NestedBootloader -PathType Container) {
+        throw "Nested bootloader directory still exists: $NestedBootloader"
+    }
+
+    Write-Host "OK: No nested bootloader directory found."
 }
 
 # ------------------------------------------------------------
@@ -386,7 +573,7 @@ foreach ($Component in $Config.components) {
     Write-Host "Mode: $($Component.mode)"
 
     # --------------------------------------------------------
-    # LOCAL ROOT FILE
+    # LOCAL ROOT
     # --------------------------------------------------------
 
     if ($Component.mode -eq "local_root") {
@@ -475,7 +662,7 @@ foreach ($Component in $Config.components) {
     }
 
     # --------------------------------------------------------
-    # GITHUB COMPONENTS
+    # GITHUB COMPONENT
     # --------------------------------------------------------
 
     if ([string]::IsNullOrWhiteSpace($Component.repo)) {
@@ -627,6 +814,14 @@ foreach ($Component in $Config.components) {
 }
 
 # ------------------------------------------------------------
+# NORMALIZE FINAL PACK
+# ------------------------------------------------------------
+
+Normalize-Bootloader
+Remove-SdOutDirectories
+Verify-Bootloader
+
+# ------------------------------------------------------------
 # VERIFY REQUIRED LOCAL FILES
 # ------------------------------------------------------------
 
@@ -678,7 +873,6 @@ if (Test-Path $BackgroundPath) {
 
     Write-Host "OK: bootloader\res\background.bmp"
     Write-Host "Size: $($BackgroundFile.Length) bytes"
-
 }
 else {
     Write-Host "WARNING: Custom background not found."
@@ -714,49 +908,15 @@ foreach ($RelativePath in $ImportantFiles) {
 }
 
 # ------------------------------------------------------------
-# VERIFY NO SdOut DIRECTORY
-# ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Checking for unwanted SdOut directory"
-Write-Host "========================================"
-
-$SdOutDirectories = @(
-    Get-ChildItem `
-        -Path $Pack `
-        -Directory `
-        -Recurse `
-        -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.Name -ieq "SdOut"
-        }
-)
-
-if ($SdOutDirectories.Count -gt 0) {
-
-    foreach ($BadDirectory in $SdOutDirectories) {
-
-        Write-Host "Removing unwanted SdOut:"
-        Write-Host "  $($BadDirectory.FullName)"
-
-        Remove-Item `
-            $BadDirectory.FullName `
-            -Recurse `
-            -Force
-    }
-}
-
-# ------------------------------------------------------------
 # VERIFY PACK
 # ------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "Verifying pack"
+Write-Host "Verifying final pack"
 Write-Host "========================================"
 
-if (-not (Test-Path $Pack)) {
+if (-not (Test-Path $Pack -PathType Container)) {
     throw "Pack directory does not exist."
 }
 
@@ -772,7 +932,30 @@ if ($PackFiles.Count -eq 0) {
 }
 
 Write-Host "Files in pack: $($PackFiles.Count)"
+
+# ------------------------------------------------------------
+# SHOW FINAL BOOTLOADER STRUCTURE
+# ------------------------------------------------------------
+
 Write-Host ""
+Write-Host "========================================"
+Write-Host "Final bootloader structure"
+Write-Host "========================================"
+
+$FinalBootloader = Join-Path $Pack "bootloader"
+
+if (Test-Path $FinalBootloader -PathType Container) {
+
+    Get-ChildItem `
+        -Path $FinalBootloader `
+        -Recurse `
+        -Force |
+        Select-Object FullName |
+        Format-Table -AutoSize
+}
+else {
+    Write-Host "WARNING: bootloader directory does not exist."
+}
 
 # ------------------------------------------------------------
 # CREATE FINAL ZIP
@@ -786,7 +969,10 @@ if (Test-Path $Output) {
     Remove-Item $Output -Force
 }
 
-Write-Host "Creating final HATS ZIP..."
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Creating final HATS ZIP"
+Write-Host "========================================"
 
 Compress-Archive `
     -Path (Join-Path $Pack "*") `
@@ -804,10 +990,15 @@ if ($OutputFile.Length -le 0) {
     throw "Final ZIP is empty."
 }
 
+# ------------------------------------------------------------
+# SUCCESS
+# ------------------------------------------------------------
+
 Write-Host ""
 Write-Host "========================================"
 Write-Host "BUILD SUCCESSFUL"
 Write-Host "========================================"
+
 Write-Host "Output: $($OutputFile.FullName)"
 Write-Host "Size:   $($OutputFile.Length) bytes"
 Write-Host ""
