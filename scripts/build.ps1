@@ -243,6 +243,63 @@ function Install-File {
 }
 
 # ------------------------------------------------------------
+# INSTALL CUSTOM BOOTLOADER ICONS
+# ------------------------------------------------------------
+
+function Install-CustomBootloaderIcons {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Installing custom bootloader icons"
+    Write-Host "========================================"
+
+    $IconSource = Join-Path $Root "assets\bootloader\res"
+    $IconDestination = Join-Path $Pack "bootloader\res"
+
+    if (-not (Test-Path $IconSource -PathType Container)) {
+        throw "Custom bootloader icon directory not found: $IconSource"
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $IconDestination `
+        -Force | Out-Null
+
+    $RequiredIcons = @(
+        "sysmmc.bmp",
+        "emummc.bmp",
+        "ofw.bmp",
+        "stock.bmp"
+    )
+
+    foreach ($IconName in $RequiredIcons) {
+
+        $Source = Join-Path $IconSource $IconName
+        $Destination = Join-Path $IconDestination $IconName
+
+        if (-not (Test-Path $Source -PathType Leaf)) {
+            throw "Required custom bootloader icon not found: $Source"
+        }
+
+        $File = Get-Item $Source
+
+        if ($File.Length -le 0) {
+            throw "Custom bootloader icon is empty: $Source"
+        }
+
+        Copy-Item `
+            -LiteralPath $Source `
+            -Destination $Destination `
+            -Force `
+            -ErrorAction Stop
+
+        Write-Host "Installed: bootloader\res\$IconName"
+    }
+
+    Write-Host "All custom bootloader icons installed successfully."
+}
+
+# ------------------------------------------------------------
 # MERGE DIRECTORY CONTENTS
 # ------------------------------------------------------------
 
@@ -822,6 +879,12 @@ Remove-SdOutDirectories
 Verify-Bootloader
 
 # ------------------------------------------------------------
+# INSTALL CUSTOM BOOTLOADER ICONS
+# ------------------------------------------------------------
+
+Install-CustomBootloaderIcons
+
+# ------------------------------------------------------------
 # VERIFY REQUIRED LOCAL FILES
 # ------------------------------------------------------------
 
@@ -850,6 +913,42 @@ foreach ($RelativePath in $RequiredLocalFiles) {
     }
 
     Write-Host "OK: $RelativePath"
+}
+
+# ------------------------------------------------------------
+# VERIFY CUSTOM BOOTLOADER RESOURCES
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying custom bootloader resources"
+Write-Host "========================================"
+
+$BootloaderResPath = Join-Path $Pack "bootloader\res"
+
+$RequiredBootloaderImages = @(
+    "sysmmc.bmp",
+    "emummc.bmp",
+    "ofw.bmp",
+    "stock.bmp"
+)
+
+foreach ($ImageName in $RequiredBootloaderImages) {
+
+    $ImagePath = Join-Path $BootloaderResPath $ImageName
+
+    if (-not (Test-Path $ImagePath -PathType Leaf)) {
+        throw "Required bootloader image missing: bootloader\res\$ImageName"
+    }
+
+    $ImageFile = Get-Item $ImagePath
+
+    if ($ImageFile.Length -le 0) {
+        throw "Bootloader image is empty: $ImageName"
+    }
+
+    Write-Host "OK: bootloader\res\$ImageName"
+    Write-Host "Size: $($ImageFile.Length) bytes"
 }
 
 # ------------------------------------------------------------
