@@ -300,6 +300,47 @@ function Install-CustomBootloaderIcons {
 }
 
 # ------------------------------------------------------------
+# INSTALL CUSTOM HEKATE CONFIGURATION
+# ------------------------------------------------------------
+
+function Install-CustomHekateConfig {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Installing custom Hekate configuration"
+    Write-Host "========================================"
+
+    $ConfigSource = Join-Path $Root "assets\bootloader\hekate_ipl.ini"
+    $ConfigDestination = Join-Path $Pack "bootloader\hekate_ipl.ini"
+
+    if (-not (Test-Path $ConfigSource -PathType Leaf)) {
+        throw "Custom hekate_ipl.ini not found: $ConfigSource"
+    }
+
+    $ConfigFile = Get-Item $ConfigSource
+
+    if ($ConfigFile.Length -le 0) {
+        throw "Custom hekate_ipl.ini is empty."
+    }
+
+    $BootloaderDirectory = Split-Path $ConfigDestination -Parent
+
+    New-Item `
+        -ItemType Directory `
+        -Path $BootloaderDirectory `
+        -Force | Out-Null
+
+    Copy-Item `
+        -LiteralPath $ConfigSource `
+        -Destination $ConfigDestination `
+        -Force `
+        -ErrorAction Stop
+
+    Write-Host "Installed:"
+    Write-Host "  bootloader\hekate_ipl.ini"
+}
+
+# ------------------------------------------------------------
 # MERGE DIRECTORY CONTENTS
 # ------------------------------------------------------------
 
@@ -879,10 +920,11 @@ Remove-SdOutDirectories
 Verify-Bootloader
 
 # ------------------------------------------------------------
-# INSTALL CUSTOM BOOTLOADER ICONS
+# INSTALL CUSTOM BOOTLOADER RESOURCES
 # ------------------------------------------------------------
 
 Install-CustomBootloaderIcons
+Install-CustomHekateConfig
 
 # ------------------------------------------------------------
 # VERIFY REQUIRED LOCAL FILES
@@ -950,6 +992,30 @@ foreach ($ImageName in $RequiredBootloaderImages) {
     Write-Host "OK: bootloader\res\$ImageName"
     Write-Host "Size: $($ImageFile.Length) bytes"
 }
+
+# ------------------------------------------------------------
+# VERIFY CUSTOM HEKATE CONFIGURATION
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying custom Hekate configuration"
+Write-Host "========================================"
+
+$HekateConfigPath = Join-Path $Pack "bootloader\hekate_ipl.ini"
+
+if (-not (Test-Path $HekateConfigPath -PathType Leaf)) {
+    throw "Custom hekate_ipl.ini is missing."
+}
+
+$HekateConfigFile = Get-Item $HekateConfigPath
+
+if ($HekateConfigFile.Length -le 0) {
+    throw "Custom hekate_ipl.ini is empty."
+}
+
+Write-Host "OK: bootloader\hekate_ipl.ini"
+Write-Host "Size: $($HekateConfigFile.Length) bytes"
 
 # ------------------------------------------------------------
 # VERIFY CUSTOM BACKGROUND
