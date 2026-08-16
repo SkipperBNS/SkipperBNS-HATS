@@ -267,7 +267,7 @@ function Install-CustomBootloaderIcons {
 
     $RequiredIcons = @(
         "emummc.bmp",
-        "ofw.bmp",
+        "ofw.bmp"
     )
 
     foreach ($IconName in $RequiredIcons) {
@@ -968,7 +968,7 @@ $BootloaderResPath = Join-Path $Pack "bootloader\res"
 
 $RequiredBootloaderImages = @(
     "emummc.bmp",
-    "ofw.bmp",
+    "ofw.bmp"
 )
 
 foreach ($ImageName in $RequiredBootloaderImages) {
