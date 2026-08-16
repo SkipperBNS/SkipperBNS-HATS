@@ -9,9 +9,9 @@ Write-Host "       SkipperBNS HATS Pack Builder"
 Write-Host "========================================"
 Write-Host ""
 
-# ------------------------------------------------------------
+# ============================================================
 # PATHS
-# ------------------------------------------------------------
+# ============================================================
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Pack = Join-Path $Root "pack"
@@ -23,11 +23,13 @@ Write-Host "Pack: $Pack"
 Write-Host "Work: $Work"
 Write-Host ""
 
-# ------------------------------------------------------------
+# ============================================================
 # CLEAN BUILD DIRECTORIES
-# ------------------------------------------------------------
+# ============================================================
 
-Write-Host "Cleaning previous build..."
+Write-Host "========================================"
+Write-Host "Cleaning previous build"
+Write-Host "========================================"
 
 if (Test-Path $Work) {
     Remove-Item $Work -Recurse -Force
@@ -43,11 +45,11 @@ New-Item -ItemType Directory -Path $Pack -Force | Out-Null
 Write-Host "Build directories ready."
 Write-Host ""
 
-# ------------------------------------------------------------
+# ============================================================
 # CHECK COMPONENTS
-# ------------------------------------------------------------
+# ============================================================
 
-if (-not (Test-Path $ComponentsFile)) {
+if (-not (Test-Path $ComponentsFile -PathType Leaf)) {
     throw "components.json was not found: $ComponentsFile"
 }
 
@@ -71,9 +73,9 @@ if ($null -eq $Config.components) {
 Write-Host "Components configured: $($Config.components.Count)"
 Write-Host ""
 
-# ------------------------------------------------------------
+# ============================================================
 # GITHUB API
-# ------------------------------------------------------------
+# ============================================================
 
 $GitHubToken = $env:GITHUB_TOKEN
 
@@ -92,9 +94,9 @@ else {
 
 Write-Host ""
 
-# ------------------------------------------------------------
+# ============================================================
 # GET LATEST RELEASE
-# ------------------------------------------------------------
+# ============================================================
 
 function Get-LatestRelease {
     param(
@@ -104,7 +106,7 @@ function Get-LatestRelease {
 
     $Url = "https://api.github.com/repos/$Repo/releases/latest"
 
-    Write-Host "Checking latest release..."
+    Write-Host "Checking latest release for $Repo..."
 
     for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
 
@@ -128,9 +130,9 @@ function Get-LatestRelease {
     }
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # FIND ASSET
-# ------------------------------------------------------------
+# ============================================================
 
 function Find-Asset {
     param(
@@ -151,9 +153,9 @@ function Find-Asset {
     return $null
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # DOWNLOAD ASSET
-# ------------------------------------------------------------
+# ============================================================
 
 function Download-Asset {
     param(
@@ -173,7 +175,7 @@ function Download-Asset {
         -UseBasicParsing `
         -ErrorAction Stop
 
-    if (-not (Test-Path $Destination)) {
+    if (-not (Test-Path $Destination -PathType Leaf)) {
         throw "Download failed: $Destination"
     }
 
@@ -186,9 +188,9 @@ function Download-Asset {
     Write-Host "Downloaded: $($DownloadedFile.Length) bytes"
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # EXTRACT ZIP
-# ------------------------------------------------------------
+# ============================================================
 
 function Install-Zip {
     param(
@@ -209,9 +211,9 @@ function Install-Zip {
         -ErrorAction Stop
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # COPY FILE
-# ------------------------------------------------------------
+# ============================================================
 
 function Install-File {
     param(
@@ -242,9 +244,9 @@ function Install-File {
     Write-Host "  $Destination"
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # MERGE DIRECTORY CONTENTS
-# ------------------------------------------------------------
+# ============================================================
 
 function Merge-DirectoryContents {
     param(
@@ -272,23 +274,17 @@ function Merge-DirectoryContents {
 
         if ($Item.PSIsContainer) {
 
-            if (Test-Path $Target -PathType Container) {
-
-                Merge-DirectoryContents `
-                    -Source $Item.FullName `
-                    -Destination $Target
-            }
-            else {
+            if (-not (Test-Path $Target -PathType Container)) {
 
                 New-Item `
                     -ItemType Directory `
                     -Path $Target `
                     -Force | Out-Null
-
-                Merge-DirectoryContents `
-                    -Source $Item.FullName `
-                    -Destination $Target
             }
+
+            Merge-DirectoryContents `
+                -Source $Item.FullName `
+                -Destination $Target
         }
         else {
 
@@ -301,9 +297,9 @@ function Merge-DirectoryContents {
     }
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # INSTALL HATS BASE
-# ------------------------------------------------------------
+# ============================================================
 
 function Install-HatsBase {
     param(
@@ -405,9 +401,9 @@ function Install-HatsBase {
     throw "Could not locate the HATS SD contents or SdOut directory."
 }
 
-# ------------------------------------------------------------
-# NORMALIZE NESTED BOOTLOADER
-# ------------------------------------------------------------
+# ============================================================
+# NORMALIZE BOOTLOADER
+# ============================================================
 
 function Normalize-Bootloader {
 
@@ -489,9 +485,9 @@ function Normalize-Bootloader {
     Write-Host "Bootloader structure is clean."
 }
 
-# ------------------------------------------------------------
-# REMOVE SdOut DIRECTORIES
-# ------------------------------------------------------------
+# ============================================================
+# REMOVE SDOUT DIRECTORIES
+# ============================================================
 
 function Remove-SdOutDirectories {
 
@@ -525,139 +521,311 @@ function Remove-SdOutDirectories {
     }
 }
 
-# ------------------------------------------------------------
-# REMOVE DUPLICATE APPLICATION NRO FILES
-# ------------------------------------------------------------
+# ============================================================
+# INSTALL CUSTOM HEKATE RESOURCES
+# ============================================================
 
-function Remove-DuplicateApplications {
+function Install-CustomHekateResources {
 
     Write-Host ""
     Write-Host "========================================"
-    Write-Host "Removing duplicate application NRO files"
+    Write-Host "Installing custom Hekate resources"
+    Write-Host "========================================"
+
+    $Source = Join-Path $Root "assets\bootloader\res"
+    $Destination = Join-Path $Pack "bootloader\res"
+
+    if (-not (Test-Path $Source -PathType Container)) {
+        throw "Custom Hekate resource directory not found: $Source"
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $Destination `
+        -Force | Out-Null
+
+    # --------------------------------------------------------
+    # ONLY THESE TWO CUSTOM ICONS
+    # --------------------------------------------------------
+
+    $RequiredIcons = @(
+        "emummc.bmp",
+        "ofw.bmp"
+    )
+
+    foreach ($IconName in $RequiredIcons) {
+
+        $IconSource = Join-Path $Source $IconName
+        $IconDestination = Join-Path $Destination $IconName
+
+        if (-not (Test-Path $IconSource -PathType Leaf)) {
+            throw "Required custom Hekate icon not found: $IconSource"
+        }
+
+        $IconFile = Get-Item $IconSource
+
+        if ($IconFile.Length -le 0) {
+            throw "Custom Hekate icon is empty: $IconSource"
+        }
+
+        Copy-Item `
+            -LiteralPath $IconSource `
+            -Destination $IconDestination `
+            -Force `
+            -ErrorAction Stop
+
+        Write-Host "Installed: bootloader\res\$IconName"
+    }
+
+    # --------------------------------------------------------
+    # BACKGROUND
+    # --------------------------------------------------------
+
+    $BackgroundSource = Join-Path $Source "background.bmp"
+    $BackgroundDestination = Join-Path $Destination "background.bmp"
+
+    if (Test-Path $BackgroundSource -PathType Leaf) {
+
+        $BackgroundFile = Get-Item $BackgroundSource
+
+        if ($BackgroundFile.Length -le 0) {
+            throw "Custom Hekate background is empty."
+        }
+
+        Copy-Item `
+            -LiteralPath $BackgroundSource `
+            -Destination $BackgroundDestination `
+            -Force `
+            -ErrorAction Stop
+
+        Write-Host "Installed: bootloader\res\background.bmp"
+    }
+    else {
+
+        Write-Host "No custom background found in assets."
+        Write-Host "Keeping the HATS/Hekate background."
+    }
+}
+
+# ============================================================
+# INSTALL CLEAN HEKATE CONFIG
+# ============================================================
+
+function Install-CleanHekateConfig {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Installing clean Hekate configuration"
+    Write-Host "========================================"
+
+    $Bootloader = Join-Path $Pack "bootloader"
+    $ConfigPath = Join-Path $Bootloader "hekate_ipl.ini"
+
+    New-Item `
+        -ItemType Directory `
+        -Path $Bootloader `
+        -Force | Out-Null
+
+    # Remove additional ini files.
+    $IniDirectory = Join-Path $Bootloader "ini"
+
+    if (Test-Path $IniDirectory -PathType Container) {
+
+        Write-Host "Removing extra Hekate configuration files:"
+        Write-Host "  $IniDirectory"
+
+        Remove-Item `
+            -LiteralPath $IniDirectory `
+            -Recurse `
+            -Force
+    }
+
+    # --------------------------------------------------------
+    # ONLY TWO MAIN HEKATE ENTRIES
+    # --------------------------------------------------------
+
+    $HekateConfig = @'
+[config]
+autoboot=0
+autoboot_list=0
+bootwait=3
+noticker=0
+backlight=100
+autohosoff=1
+autonogc=1
+updater2p=1
+bootprotect=0
+
+[100% STOCK OFW]
+fss0=atmosphere/package3
+stock=1
+emummc_force_disable=1
+icon=bootloader/res/ofw.bmp
+
+[CFW (EMUMMC)]
+fss0=atmosphere/package3
+emummcforce=1
+icon=bootloader/res/emummc.bmp
+'@
+
+    Set-Content `
+        -LiteralPath $ConfigPath `
+        -Value $HekateConfig `
+        -Encoding ASCII `
+        -Force
+
+    Write-Host ""
+    Write-Host "Installed clean Hekate configuration:"
+    Write-Host "  100% STOCK OFW"
+    Write-Host "  CFW (EMUMMC)"
+}
+
+# ============================================================
+# REMOVE DUPLICATE APPLICATION NRO FILES
+# ============================================================
+
+function Remove-DuplicateApplicationNros {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Cleaning duplicate application NRO files"
     Write-Host "========================================"
 
     $SwitchPath = Join-Path $Pack "switch"
 
     if (-not (Test-Path $SwitchPath -PathType Container)) {
-        Write-Host "No switch directory found."
+
+        Write-Host "switch directory not found."
         return
     }
 
-    # These applications are supplied by HATS Base.
-    # If an application folder exists, remove the duplicate
-    # root-level NRO file.
-
-    $Applications = @(
-        @{
-            Name = "90DNS Testing Utility"
-            Nro = "90DNSTester.nro"
-            Folder = "Switch_90DNS_tester"
-        },
-        @{
-            Name = "Goldleaf"
-            Nro = "Goldleaf.nro"
-            Folder = "Goldleaf"
-        },
-        @{
-            Name = "JKSV"
-            Nro = "JKSV.nro"
-            Folder = "JKSV"
-        },
-        @{
-            Name = "NXThemes Installer"
-            Nro = "NXThemesInstaller.nro"
-            Folder = "NXThemesInstaller"
-        }
+    # These applications already have their own folders
+    # containing their application files.
+    #
+    # Remove the duplicate root-level NRO files only.
+    $DuplicateRootNros = @(
+        "90DNSTester.nro",
+        "Goldleaf.nro",
+        "JKSV.nro",
+        "NXThemesInstaller.nro"
     )
 
-    foreach ($Application in $Applications) {
+    foreach ($NroName in $DuplicateRootNros) {
 
-        $NroPath = Join-Path $SwitchPath $Application.Nro
-        $FolderPath = Join-Path $SwitchPath $Application.Folder
+        $NroPath = Join-Path $SwitchPath $NroName
 
-        if (
-            (Test-Path $NroPath -PathType Leaf) -and
-            (Test-Path $FolderPath -PathType Container)
-        ) {
+        if (Test-Path $NroPath -PathType Leaf) {
 
             Write-Host "Removing duplicate:"
-            Write-Host "  $($Application.Nro)"
+            Write-Host "  switch\$NroName"
 
             Remove-Item `
                 -LiteralPath $NroPath `
-                -Force `
-                -ErrorAction Stop
+                -Force
         }
         else {
 
-            if (Test-Path $NroPath -PathType Leaf) {
-                Write-Host "Keeping $($Application.Nro) because no matching application folder was found."
-            }
+            Write-Host "Not present:"
+            Write-Host "  switch\$NroName"
         }
     }
 
-    Write-Host "Application duplicate cleanup complete."
+    Write-Host ""
+    Write-Host "Duplicate application NRO cleanup complete."
 }
 
-# ------------------------------------------------------------
-# REMOVE DUPLICATE OVERLAYS
-# ------------------------------------------------------------
+# ============================================================
+# REMOVE DUPLICATE EDIZON OVERLAY
+# ============================================================
 
 function Remove-DuplicateOverlays {
 
     Write-Host ""
     Write-Host "========================================"
-    Write-Host "Removing duplicate overlays"
+    Write-Host "Cleaning duplicate overlays"
     Write-Host "========================================"
 
     $OverlayPath = Join-Path $Pack "switch\.overlays"
 
     if (-not (Test-Path $OverlayPath -PathType Container)) {
-        Write-Host "No .overlays directory found."
+
+        Write-Host "switch\.overlays directory not found."
         return
     }
 
-    # --------------------------------------------------------
-    # EDIZON
-    # --------------------------------------------------------
+    # Keep EdiZon.ovl.
+    # Remove the duplicate alternate filename.
+    $DuplicateOverlays = @(
+        "ovlEdiZon.ovl"
+    )
 
-    $EdiZon = Join-Path $OverlayPath "EdiZon.ovl"
-    $OldEdiZon = Join-Path $OverlayPath "ovlEdiZon.ovl"
+    foreach ($OverlayName in $DuplicateOverlays) {
 
-    if (
-        (Test-Path $EdiZon -PathType Leaf) -and
-        (Test-Path $OldEdiZon -PathType Leaf)
-    ) {
+        $OverlayFile = Join-Path $OverlayPath $OverlayName
 
-        Write-Host "Removing duplicate EdiZon overlay:"
-        Write-Host "  ovlEdiZon.ovl"
+        if (Test-Path $OverlayFile -PathType Leaf) {
 
-        Remove-Item `
-            -LiteralPath $OldEdiZon `
-            -Force `
-            -ErrorAction Stop
-    }
-    elseif (
-        (-not (Test-Path $EdiZon -PathType Leaf)) -and
-        (Test-Path $OldEdiZon -PathType Leaf)
-    ) {
+            Write-Host "Removing duplicate overlay:"
+            Write-Host "  switch\.overlays\$OverlayName"
 
-        Write-Host "EdiZon.ovl not found."
-        Write-Host "Renaming ovlEdiZon.ovl to EdiZon.ovl"
-
-        Rename-Item `
-            -LiteralPath $OldEdiZon `
-            -NewName "EdiZon.ovl" `
-            -Force `
-            -ErrorAction Stop
+            Remove-Item `
+                -LiteralPath $OverlayFile `
+                -Force
+        }
     }
 
-    Write-Host "Overlay duplicate cleanup complete."
+    Write-Host "Duplicate overlay cleanup complete."
 }
 
-# ------------------------------------------------------------
+# ============================================================
+# REMOVE EMPTY DIRECTORIES
+# ============================================================
+
+function Remove-EmptyDirectories {
+
+    Write-Host ""
+    Write-Host "Removing empty directories..."
+
+    $Changed = $true
+
+    while ($Changed) {
+
+        $Changed = $false
+
+        $Directories = @(
+            Get-ChildItem `
+                -Path $Pack `
+                -Directory `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue |
+                Sort-Object FullName -Descending
+        )
+
+        foreach ($Directory in $Directories) {
+
+            $Items = @(Get-ChildItem `
+                -LiteralPath $Directory.FullName `
+                -Force `
+                -ErrorAction SilentlyContinue)
+
+            if ($Items.Count -eq 0) {
+
+                Remove-Item `
+                    -LiteralPath $Directory.FullName `
+                    -Force
+
+                $Changed = $true
+            }
+        }
+    }
+
+    Write-Host "Empty directory cleanup complete."
+}
+
+# ============================================================
 # VERIFY BOOTLOADER
-# ------------------------------------------------------------
+# ============================================================
 
 function Verify-Bootloader {
 
@@ -670,64 +838,9 @@ function Verify-Bootloader {
     Write-Host "OK: No nested bootloader directory found."
 }
 
-# ------------------------------------------------------------
-# VERIFY CUSTOM HEKATE RESOURCES
-# ------------------------------------------------------------
-
-function Verify-CustomHekateResources {
-
-    Write-Host ""
-    Write-Host "========================================"
-    Write-Host "Verifying custom Hekate resources"
-    Write-Host "========================================"
-
-    $ResPath = Join-Path $Pack "bootloader\res"
-
-    $RequiredImages = @(
-        "background.bmp",
-        "sysmmc.bmp",
-        "emummc.bmp",
-        "ofw.bmp",
-        "stock.bmp"
-    )
-
-    foreach ($ImageName in $RequiredImages) {
-
-        $ImagePath = Join-Path $ResPath $ImageName
-
-        if (-not (Test-Path $ImagePath -PathType Leaf)) {
-            throw "Required Hekate image missing: bootloader\res\$ImageName"
-        }
-
-        $ImageFile = Get-Item $ImagePath
-
-        if ($ImageFile.Length -le 0) {
-            throw "Hekate image is empty: $ImageName"
-        }
-
-        Write-Host "OK: bootloader\res\$ImageName"
-        Write-Host "Size: $($ImageFile.Length) bytes"
-    }
-
-    $HekateConfig = Join-Path $Pack "bootloader\hekate_ipl.ini"
-
-    if (-not (Test-Path $HekateConfig -PathType Leaf)) {
-        throw "Custom hekate_ipl.ini is missing."
-    }
-
-    $ConfigFile = Get-Item $HekateConfig
-
-    if ($ConfigFile.Length -le 0) {
-        throw "Custom hekate_ipl.ini is empty."
-    }
-
-    Write-Host "OK: bootloader\hekate_ipl.ini"
-    Write-Host "Size: $($ConfigFile.Length) bytes"
-}
-
-# ------------------------------------------------------------
+# ============================================================
 # MAIN BUILD
-# ------------------------------------------------------------
+# ============================================================
 
 $Index = 0
 $Total = $Config.components.Count
@@ -748,9 +861,9 @@ foreach ($Component in $Config.components) {
 
     Write-Host "Mode: $($Component.mode)"
 
-    # --------------------------------------------------------
+    # ========================================================
     # LOCAL ROOT
-    # --------------------------------------------------------
+    # ========================================================
 
     if ($Component.mode -eq "local_root") {
 
@@ -779,9 +892,9 @@ foreach ($Component in $Config.components) {
         continue
     }
 
-    # --------------------------------------------------------
+    # ========================================================
     # HATS BASE
-    # --------------------------------------------------------
+    # ========================================================
 
     if ($Component.mode -eq "hats_base") {
 
@@ -837,9 +950,9 @@ foreach ($Component in $Config.components) {
         continue
     }
 
-    # --------------------------------------------------------
+    # ========================================================
     # GITHUB COMPONENT
-    # --------------------------------------------------------
+    # ========================================================
 
     if ([string]::IsNullOrWhiteSpace($Component.repo)) {
         throw "Component '$($Component.name)' has no repository."
@@ -889,9 +1002,9 @@ foreach ($Component in $Config.components) {
 
     switch ($Component.mode) {
 
-        # ----------------------------------------------------
+        # ====================================================
         # ZIP
-        # ----------------------------------------------------
+        # ====================================================
 
         "zip" {
 
@@ -917,9 +1030,9 @@ foreach ($Component in $Config.components) {
             continue
         }
 
-        # ----------------------------------------------------
+        # ====================================================
         # NRO
-        # ----------------------------------------------------
+        # ====================================================
 
         "nro" {
 
@@ -938,9 +1051,9 @@ foreach ($Component in $Config.components) {
             continue
         }
 
-        # ----------------------------------------------------
+        # ====================================================
         # OVL
-        # ----------------------------------------------------
+        # ====================================================
 
         "ovl" {
 
@@ -949,7 +1062,7 @@ foreach ($Component in $Config.components) {
             }
 
             $OverlayDestination = $Component.destination `
-                -replace '^switch[\\/]\\.overlays[\\/]', 'switch\.overlays\'
+                -replace '^switch[\\/]\.overlays[\\/]', 'switch\.overlays\'
 
             $Destination = Join-Path `
                 $Pack `
@@ -962,9 +1075,9 @@ foreach ($Component in $Config.components) {
             continue
         }
 
-        # ----------------------------------------------------
+        # ====================================================
         # FILE
-        # ----------------------------------------------------
+        # ====================================================
 
         "file" {
 
@@ -989,9 +1102,9 @@ foreach ($Component in $Config.components) {
     }
 }
 
-# ------------------------------------------------------------
-# FINAL CLEANUP
-# ------------------------------------------------------------
+# ============================================================
+# FINAL NORMALIZATION
+# ============================================================
 
 Write-Host ""
 Write-Host "========================================"
@@ -999,24 +1112,166 @@ Write-Host "FINAL PACK CLEANUP"
 Write-Host "========================================"
 
 Normalize-Bootloader
-
 Remove-SdOutDirectories
-
-Remove-DuplicateApplications
-
-Remove-DuplicateOverlays
-
 Verify-Bootloader
 
-# ------------------------------------------------------------
-# VERIFY CUSTOM HEKATE RESOURCES
-# ------------------------------------------------------------
+# ============================================================
+# CUSTOM HEKATE RESOURCES
+# ============================================================
 
-Verify-CustomHekateResources
+Install-CustomHekateResources
+Install-CleanHekateConfig
 
-# ------------------------------------------------------------
-# VERIFY REQUIRED LOCAL FILES
-# ------------------------------------------------------------
+# ============================================================
+# DUPLICATE CLEANUP
+# ============================================================
+
+Remove-DuplicateApplicationNros
+Remove-DuplicateOverlays
+Remove-EmptyDirectories
+
+# ============================================================
+# VERIFY CUSTOM HEKATE FILES
+# ============================================================
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying custom Hekate resources"
+Write-Host "========================================"
+
+$BootloaderResPath = Join-Path $Pack "bootloader\res"
+
+$RequiredBootloaderImages = @(
+    "emummc.bmp",
+    "ofw.bmp"
+)
+
+foreach ($ImageName in $RequiredBootloaderImages) {
+
+    $ImagePath = Join-Path $BootloaderResPath $ImageName
+
+    if (-not (Test-Path $ImagePath -PathType Leaf)) {
+        throw "Required Hekate image missing: bootloader\res\$ImageName"
+    }
+
+    $ImageFile = Get-Item $ImagePath
+
+    if ($ImageFile.Length -le 0) {
+        throw "Hekate image is empty: $ImageName"
+    }
+
+    Write-Host "OK: bootloader\res\$ImageName"
+    Write-Host "Size: $($ImageFile.Length) bytes"
+}
+
+# ============================================================
+# VERIFY BACKGROUND
+# ============================================================
+
+$BackgroundPath = Join-Path $Pack "bootloader\res\background.bmp"
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying Hekate background"
+Write-Host "========================================"
+
+if (Test-Path $BackgroundPath -PathType Leaf) {
+
+    $BackgroundFile = Get-Item $BackgroundPath
+
+    if ($BackgroundFile.Length -le 0) {
+        throw "Hekate background is empty."
+    }
+
+    Write-Host "OK: bootloader\res\background.bmp"
+    Write-Host "Size: $($BackgroundFile.Length) bytes"
+}
+else {
+
+    Write-Host "WARNING: background.bmp was not found."
+    Write-Host "The default Hekate background will be used."
+}
+
+# ============================================================
+# VERIFY HEKATE CONFIGURATION
+# ============================================================
+
+$HekateConfigPath = Join-Path $Pack "bootloader\hekate_ipl.ini"
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying Hekate configuration"
+Write-Host "========================================"
+
+if (-not (Test-Path $HekateConfigPath -PathType Leaf)) {
+    throw "bootloader\hekate_ipl.ini is missing."
+}
+
+$HekateConfigFile = Get-Item $HekateConfigPath
+
+if ($HekateConfigFile.Length -le 0) {
+    throw "bootloader\hekate_ipl.ini is empty."
+}
+
+Write-Host "OK: bootloader\hekate_ipl.ini"
+
+# Make sure our two icons are referenced.
+$HekateConfigText = Get-Content `
+    -LiteralPath $HekateConfigPath `
+    -Raw
+
+if ($HekateConfigText -notmatch 'icon=bootloader/res/ofw\.bmp') {
+    throw "OFW icon is not referenced by hekate_ipl.ini."
+}
+
+if ($HekateConfigText -notmatch 'icon=bootloader/res/emummc\.bmp') {
+    throw "emuMMC icon is not referenced by hekate_ipl.ini."
+}
+
+if ($HekateConfigText -notmatch '\[100% STOCK OFW\]') {
+    throw "100% STOCK OFW entry is missing from hekate_ipl.ini."
+}
+
+if ($HekateConfigText -notmatch '\[CFW \(EMUMMC\)\]') {
+    throw "CFW (EMUMMC) entry is missing from hekate_ipl.ini."
+}
+
+Write-Host "OK: 100% STOCK OFW entry"
+Write-Host "OK: CFW (EMUMMC) entry"
+Write-Host "OK: OFW custom icon referenced"
+Write-Host "OK: emuMMC custom icon referenced"
+
+# ============================================================
+# VERIFY NO EXTRA MAIN CONFIG ENTRIES
+# ============================================================
+
+$MainEntries = @(
+    [regex]::Matches(
+        $HekateConfigText,
+        '(?m)^\[([^\]]+)\]\s*$'
+    ) |
+    ForEach-Object {
+        $_.Groups[1].Value
+    } |
+    Where-Object {
+        $_ -ne "config"
+    }
+)
+
+Write-Host ""
+Write-Host "Hekate main entries found: $($MainEntries.Count)"
+
+foreach ($Entry in $MainEntries) {
+    Write-Host "  $Entry"
+}
+
+if ($MainEntries.Count -ne 2) {
+    throw "Hekate configuration contains $($MainEntries.Count) main entries. Expected exactly 2."
+}
+
+# ============================================================
+# VERIFY REQUIRED LOCAL APPLICATIONS
+# ============================================================
 
 Write-Host ""
 Write-Host "========================================"
@@ -1045,61 +1300,120 @@ foreach ($RelativePath in $RequiredLocalFiles) {
     Write-Host "OK: $RelativePath"
 }
 
-# ------------------------------------------------------------
-# VERIFY DUPLICATE APPLICATIONS ARE GONE
-# ------------------------------------------------------------
+# ============================================================
+# VERIFY DUPLICATE ROOT NROS ARE GONE
+# ============================================================
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "Verifying application cleanup"
+Write-Host "Verifying duplicate NRO cleanup"
 Write-Host "========================================"
 
-$SwitchPath = Join-Path $Pack "switch"
-
-$DuplicateRootNros = @(
-    "90DNSTester.nro",
-    "Goldleaf.nro",
-    "JKSV.nro",
-    "NXThemesInstaller.nro"
+$DuplicateCheckFiles = @(
+    "switch\90DNSTester.nro",
+    "switch\Goldleaf.nro",
+    "switch\JKSV.nro",
+    "switch\NXThemesInstaller.nro"
 )
 
-foreach ($NroName in $DuplicateRootNros) {
+foreach ($RelativePath in $DuplicateCheckFiles) {
 
-    $NroPath = Join-Path $SwitchPath $NroName
+    $DuplicatePath = Join-Path $Pack $RelativePath
 
-    if (Test-Path $NroPath -PathType Leaf) {
-        throw "Duplicate root NRO still exists: switch\$NroName"
+    if (Test-Path $DuplicatePath -PathType Leaf) {
+
+        throw "Duplicate application NRO still exists: $RelativePath"
     }
 
-    Write-Host "OK: no duplicate switch\$NroName"
+    Write-Host "OK: removed $RelativePath"
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # VERIFY EDIZON DUPLICATE IS GONE
-# ------------------------------------------------------------
+# ============================================================
 
-$OverlayPath = Join-Path $Pack "switch\.overlays"
-
-$DuplicateEdiZon = Join-Path $OverlayPath "ovlEdiZon.ovl"
-$CorrectEdiZon = Join-Path $OverlayPath "EdiZon.ovl"
-
-if (Test-Path $DuplicateEdiZon -PathType Leaf) {
-    throw "Duplicate EdiZon overlay still exists: switch\.overlays\ovlEdiZon.ovl"
-}
-
-if (-not (Test-Path $CorrectEdiZon -PathType Leaf)) {
-    throw "EdiZon.ovl is missing from switch\.overlays"
-}
-
-Write-Host "OK: only EdiZon.ovl is installed."
-
-# ------------------------------------------------------------
-# VERIFY PACK
-# ------------------------------------------------------------
+$DuplicateEdiZon = Join-Path $Pack "switch\.overlays\ovlEdiZon.ovl"
+$KeptEdiZon = Join-Path $Pack "switch\.overlays\EdiZon.ovl"
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "Verifying final pack"
+Write-Host "Verifying EdiZon overlay cleanup"
+Write-Host "========================================"
+
+if (Test-Path $DuplicateEdiZon -PathType Leaf) {
+    throw "Duplicate EdiZon overlay still exists."
+}
+
+Write-Host "OK: duplicate ovlEdiZon.ovl removed."
+
+if (Test-Path $KeptEdiZon -PathType Leaf) {
+    Write-Host "OK: EdiZon.ovl kept."
+}
+else {
+    Write-Host "WARNING: EdiZon.ovl was not found."
+}
+
+# ============================================================
+# VERIFY IMPORTANT HATS FILES
+# ============================================================
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Verifying HATS base files"
+Write-Host "========================================"
+
+$ImportantFiles = @(
+    "boot.dat",
+    "boot.ini",
+    "exosphere.ini",
+    "manifest.json",
+    "payload.bin"
+)
+
+foreach ($RelativePath in $ImportantFiles) {
+
+    $CheckPath = Join-Path $Pack $RelativePath
+
+    if (Test-Path $CheckPath -PathType Leaf) {
+        Write-Host "OK: $RelativePath"
+    }
+    else {
+        Write-Host "WARNING: $RelativePath not found"
+    }
+}
+
+# ============================================================
+# SHOW FINAL HEKATE STRUCTURE
+# ============================================================
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Final Hekate structure"
+Write-Host "========================================"
+
+$FinalBootloader = Join-Path $Pack "bootloader"
+
+if (Test-Path $FinalBootloader -PathType Container) {
+
+    Get-ChildItem `
+        -Path $FinalBootloader `
+        -Recurse `
+        -Force |
+        Select-Object FullName |
+        Format-Table -AutoSize
+}
+else {
+
+    Write-Host "WARNING: bootloader directory does not exist."
+}
+
+# ============================================================
+# FINAL PACK COUNT
+# ============================================================
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "Final pack verification"
 Write-Host "========================================"
 
 if (-not (Test-Path $Pack -PathType Container)) {
@@ -1119,74 +1433,9 @@ if ($PackFiles.Count -eq 0) {
 
 Write-Host "Files in pack: $($PackFiles.Count)"
 
-# ------------------------------------------------------------
-# SHOW FINAL SWITCH STRUCTURE
-# ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Final switch structure"
-Write-Host "========================================"
-
-$FinalSwitch = Join-Path $Pack "switch"
-
-if (Test-Path $FinalSwitch -PathType Container) {
-
-    Get-ChildItem `
-        -Path $FinalSwitch `
-        -Force |
-        Select-Object Name, Mode, Length |
-        Format-Table -AutoSize
-}
-
-# ------------------------------------------------------------
-# SHOW FINAL OVERLAY STRUCTURE
-# ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Final overlay structure"
-Write-Host "========================================"
-
-$FinalOverlays = Join-Path $Pack "switch\.overlays"
-
-if (Test-Path $FinalOverlays -PathType Container) {
-
-    Get-ChildItem `
-        -Path $FinalOverlays `
-        -File `
-        -Force |
-        Select-Object Name, Length |
-        Format-Table -AutoSize
-}
-
-# ------------------------------------------------------------
-# SHOW FINAL BOOTLOADER STRUCTURE
-# ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Final bootloader structure"
-Write-Host "========================================"
-
-$FinalBootloader = Join-Path $Pack "bootloader"
-
-if (Test-Path $FinalBootloader -PathType Container) {
-
-    Get-ChildItem `
-        -Path $FinalBootloader `
-        -Recurse `
-        -Force |
-        Select-Object FullName |
-        Format-Table -AutoSize
-}
-else {
-    Write-Host "WARNING: bootloader directory does not exist."
-}
-
-# ------------------------------------------------------------
+# ============================================================
 # CREATE FINAL ZIP
-# ------------------------------------------------------------
+# ============================================================
 
 $Output = Join-Path `
     $Root `
@@ -1207,7 +1456,7 @@ Compress-Archive `
     -Force `
     -ErrorAction Stop
 
-if (-not (Test-Path $Output)) {
+if (-not (Test-Path $Output -PathType Leaf)) {
     throw "Final ZIP was not created."
 }
 
@@ -1217,9 +1466,9 @@ if ($OutputFile.Length -le 0) {
     throw "Final ZIP is empty."
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # SUCCESS
-# ------------------------------------------------------------
+# ============================================================
 
 Write-Host ""
 Write-Host "========================================"
@@ -1230,16 +1479,26 @@ Write-Host "Output: $($OutputFile.FullName)"
 Write-Host "Size:   $($OutputFile.Length) bytes"
 Write-Host ""
 
-Write-Host "Pack contents:"
-
-Get-ChildItem `
-    -Path $Pack `
-    -Recurse `
-    -File |
-    Select-Object FullName, Length |
-    Format-Table -AutoSize
-
+Write-Host "Hekate menu:"
+Write-Host "  1. 100% STOCK OFW"
+Write-Host "  2. CFW (EMUMMC)"
 Write-Host ""
-Write-Host "========================================"
-Write-Host "SkipperBNS HATS BUILD COMPLETE"
-Write-Host "========================================"
+
+Write-Host "Custom icons:"
+Write-Host "  emummc.bmp"
+Write-Host "  ofw.bmp"
+Write-Host ""
+
+Write-Host "Duplicate NRO cleanup:"
+Write-Host "  90DNS Tester"
+Write-Host "  Goldleaf"
+Write-Host "  JKSV"
+Write-Host "  NXThemesInstaller"
+Write-Host ""
+
+Write-Host "Duplicate overlay cleanup:"
+Write-Host "  ovlEdiZon.ovl removed"
+Write-Host "  EdiZon.ovl kept"
+Write-Host ""
+
+Write-Host "Build completed successfully."
