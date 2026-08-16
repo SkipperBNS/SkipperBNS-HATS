@@ -225,7 +225,6 @@ function Install-File {
     $DestinationFolder = Split-Path $Destination -Parent
 
     if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
-
         New-Item `
             -ItemType Directory `
             -Path $DestinationFolder `
@@ -243,46 +242,47 @@ function Install-File {
 }
 
 # ------------------------------------------------------------
-# INSTALL CUSTOM BOOTLOADER ICONS
+# INSTALL CUSTOM BOOTLOADER RESOURCES
 # ------------------------------------------------------------
 
-function Install-CustomBootloaderIcons {
+function Install-CustomBootloaderResources {
 
     Write-Host ""
     Write-Host "========================================"
-    Write-Host "Installing custom bootloader icons"
+    Write-Host "Installing custom bootloader resources"
     Write-Host "========================================"
 
-    $IconSource = Join-Path $Root "assets\bootloader\res"
-    $IconDestination = Join-Path $Pack "bootloader\res"
+    $ResourceSource = Join-Path $Root "assets\bootloader\res"
+    $ResourceDestination = Join-Path $Pack "bootloader\res"
 
-    if (-not (Test-Path $IconSource -PathType Container)) {
-        throw "Custom bootloader icon directory not found: $IconSource"
+    if (-not (Test-Path $ResourceSource -PathType Container)) {
+        throw "Custom bootloader resource directory not found: $ResourceSource"
     }
 
     New-Item `
         -ItemType Directory `
-        -Path $IconDestination `
+        -Path $ResourceDestination `
         -Force | Out-Null
 
-    $RequiredIcons = @(
+    $RequiredResources = @(
+        "background.bmp",
         "emummc.bmp",
         "ofw.bmp"
     )
 
-    foreach ($IconName in $RequiredIcons) {
+    foreach ($ResourceName in $RequiredResources) {
 
-        $Source = Join-Path $IconSource $IconName
-        $Destination = Join-Path $IconDestination $IconName
+        $Source = Join-Path $ResourceSource $ResourceName
+        $Destination = Join-Path $ResourceDestination $ResourceName
 
         if (-not (Test-Path $Source -PathType Leaf)) {
-            throw "Required custom bootloader icon not found: $Source"
+            throw "Required bootloader resource not found: $Source"
         }
 
         $File = Get-Item $Source
 
         if ($File.Length -le 0) {
-            throw "Custom bootloader icon is empty: $Source"
+            throw "Bootloader resource is empty: $Source"
         }
 
         Copy-Item `
@@ -291,10 +291,12 @@ function Install-CustomBootloaderIcons {
             -Force `
             -ErrorAction Stop
 
-        Write-Host "Installed: bootloader\res\$IconName"
+        Write-Host "Installed: bootloader\res\$ResourceName"
+        Write-Host "Size: $($File.Length) bytes"
     }
 
-    Write-Host "All custom bootloader icons installed successfully."
+    Write-Host ""
+    Write-Host "All custom bootloader resources installed successfully."
 }
 
 # ------------------------------------------------------------
@@ -369,13 +371,11 @@ function Merge-DirectoryContents {
         if ($Item.PSIsContainer) {
 
             if (Test-Path $Target -PathType Container) {
-
                 Merge-DirectoryContents `
                     -Source $Item.FullName `
                     -Destination $Target
             }
             else {
-
                 New-Item `
                     -ItemType Directory `
                     -Path $Target `
@@ -387,7 +387,6 @@ function Merge-DirectoryContents {
             }
         }
         else {
-
             Copy-Item `
                 -LiteralPath $Item.FullName `
                 -Destination $Target `
@@ -428,10 +427,6 @@ function Install-HatsBase {
     Write-Host ""
     Write-Host "Inspecting HATS base..."
 
-    # --------------------------------------------------------
-    # LOOK FOR SdOut
-    # --------------------------------------------------------
-
     $SdOut = Get-ChildItem `
         -LiteralPath $ExtractPath `
         -Directory `
@@ -456,10 +451,6 @@ function Install-HatsBase {
         return
     }
 
-    # --------------------------------------------------------
-    # CHECK IF ARCHIVE ROOT IS ALREADY SD ROOT
-    # --------------------------------------------------------
-
     $RootEntries = @(
         Get-ChildItem `
             -LiteralPath $ExtractPath `
@@ -480,7 +471,6 @@ function Install-HatsBase {
             $Entry.Name -ieq "exosphere.ini" -or
             $Entry.Name -ieq "manifest.json"
         ) {
-
             $LooksLikeSdRoot = $true
             break
         }
@@ -515,7 +505,6 @@ function Normalize-Bootloader {
     $Bootloader = Join-Path $Pack "bootloader"
 
     if (-not (Test-Path $Bootloader -PathType Container)) {
-
         Write-Host "No bootloader directory found."
         return
     }
@@ -583,7 +572,6 @@ function Normalize-Bootloader {
         }
 
         if (Test-Path $NestedBootloader) {
-
             Remove-Item `
                 -LiteralPath $NestedBootloader `
                 -Recurse `
@@ -609,9 +597,9 @@ function Remove-SdOutDirectories {
             -Directory `
             -Recurse `
             -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.Name -ieq "SdOut"
-            }
+        Where-Object {
+            $_.Name -ieq "SdOut"
+        }
     )
 
     foreach ($Directory in $SdOutDirectories) {
@@ -668,10 +656,6 @@ foreach ($Component in $Config.components) {
 
     Write-Host "Mode: $($Component.mode)"
 
-    # --------------------------------------------------------
-    # LOCAL ROOT
-    # --------------------------------------------------------
-
     if ($Component.mode -eq "local_root") {
 
         if ([string]::IsNullOrWhiteSpace($Component.source)) {
@@ -698,10 +682,6 @@ foreach ($Component in $Config.components) {
 
         continue
     }
-
-    # --------------------------------------------------------
-    # HATS BASE
-    # --------------------------------------------------------
 
     if ($Component.mode -eq "hats_base") {
 
@@ -757,10 +737,6 @@ foreach ($Component in $Config.components) {
         continue
     }
 
-    # --------------------------------------------------------
-    # GITHUB COMPONENT
-    # --------------------------------------------------------
-
     if ([string]::IsNullOrWhiteSpace($Component.repo)) {
         throw "Component '$($Component.name)' has no repository."
     }
@@ -809,10 +785,6 @@ foreach ($Component in $Config.components) {
 
     switch ($Component.mode) {
 
-        # ----------------------------------------------------
-        # ZIP
-        # ----------------------------------------------------
-
         "zip" {
 
             $ExtractPath = Join-Path $Work "component-$Index"
@@ -837,10 +809,6 @@ foreach ($Component in $Config.components) {
             continue
         }
 
-        # ----------------------------------------------------
-        # NRO
-        # ----------------------------------------------------
-
         "nro" {
 
             if ([string]::IsNullOrWhiteSpace($Component.destination)) {
@@ -857,10 +825,6 @@ foreach ($Component in $Config.components) {
 
             continue
         }
-
-        # ----------------------------------------------------
-        # OVL
-        # ----------------------------------------------------
 
         "ovl" {
 
@@ -881,10 +845,6 @@ foreach ($Component in $Config.components) {
 
             continue
         }
-
-        # ----------------------------------------------------
-        # FILE
-        # ----------------------------------------------------
 
         "file" {
 
@@ -921,7 +881,7 @@ Verify-Bootloader
 # INSTALL CUSTOM BOOTLOADER RESOURCES
 # ------------------------------------------------------------
 
-Install-CustomBootloaderIcons
+Install-CustomBootloaderResources
 Install-CustomHekateConfig
 
 # ------------------------------------------------------------
@@ -966,27 +926,28 @@ Write-Host "========================================"
 
 $BootloaderResPath = Join-Path $Pack "bootloader\res"
 
-$RequiredBootloaderImages = @(
+$RequiredBootloaderResources = @(
+    "background.bmp",
     "emummc.bmp",
     "ofw.bmp"
 )
 
-foreach ($ImageName in $RequiredBootloaderImages) {
+foreach ($ResourceName in $RequiredBootloaderResources) {
 
-    $ImagePath = Join-Path $BootloaderResPath $ImageName
+    $ResourcePath = Join-Path $BootloaderResPath $ResourceName
 
-    if (-not (Test-Path $ImagePath -PathType Leaf)) {
-        throw "Required bootloader image missing: bootloader\res\$ImageName"
+    if (-not (Test-Path $ResourcePath -PathType Leaf)) {
+        throw "Required bootloader resource missing: bootloader\res\$ResourceName"
     }
 
-    $ImageFile = Get-Item $ImagePath
+    $ResourceFile = Get-Item $ResourcePath
 
-    if ($ImageFile.Length -le 0) {
-        throw "Bootloader image is empty: $ImageName"
+    if ($ResourceFile.Length -le 0) {
+        throw "Bootloader resource is empty: $ResourceName"
     }
 
-    Write-Host "OK: bootloader\res\$ImageName"
-    Write-Host "Size: $($ImageFile.Length) bytes"
+    Write-Host "OK: bootloader\res\$ResourceName"
+    Write-Host "Size: $($ResourceFile.Length) bytes"
 }
 
 # ------------------------------------------------------------
@@ -1012,32 +973,6 @@ if ($HekateConfigFile.Length -le 0) {
 
 Write-Host "OK: bootloader\hekate_ipl.ini"
 Write-Host "Size: $($HekateConfigFile.Length) bytes"
-
-# ------------------------------------------------------------
-# VERIFY CUSTOM BACKGROUND
-# ------------------------------------------------------------
-
-$BackgroundPath = Join-Path $Pack "bootloader\res\background.bmp"
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Verifying custom Hekate background"
-Write-Host "========================================"
-
-if (Test-Path $BackgroundPath) {
-
-    $BackgroundFile = Get-Item $BackgroundPath
-
-    if ($BackgroundFile.Length -le 0) {
-        throw "Custom background is empty."
-    }
-
-    Write-Host "OK: bootloader\res\background.bmp"
-    Write-Host "Size: $($BackgroundFile.Length) bytes"
-}
-else {
-    Write-Host "WARNING: Custom background not found."
-}
 
 # ------------------------------------------------------------
 # VERIFY IMPORTANT HATS FILES
