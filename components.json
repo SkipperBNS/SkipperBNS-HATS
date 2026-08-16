@@ -21,25 +21,40 @@
       "mode": "zip"
     },
     {
-      "name": "JKSV",
-      "repo": "J-D-K/JKSV",
-      "asset_regex": "^JKSV\\.nro$",
-      "mode": "nro",
-      "destination": "switch/JKSV.nro"
+      "name": "Custom Hekate Background",
+      "mode": "local_root",
+      "source": "assets/bootloader/res/background.bmp",
+      "destination": "bootloader/res/background.bmp"
     },
     {
-      "name": "Goldleaf",
-      "repo": "XorTroll/Goldleaf",
-      "asset_regex": "^Goldleaf\\.nro$",
-      "mode": "nro",
-      "destination": "switch/Goldleaf.nro"
+      "name": "Custom Hekate sysMMC Image",
+      "mode": "local_root",
+      "source": "assets/bootloader/res/sysmmc.bmp",
+      "destination": "bootloader/res/sysmmc.bmp"
     },
     {
-      "name": "NXThemesInstaller",
-      "repo": "exelix11/SwitchThemeInjector",
-      "asset_regex": "^NXThemesInstaller\\.nro$",
-      "mode": "nro",
-      "destination": "switch/NXThemesInstaller.nro"
+      "name": "Custom Hekate emuMMC Image",
+      "mode": "local_root",
+      "source": "assets/bootloader/res/emummc.bmp",
+      "destination": "bootloader/res/emummc.bmp"
+    },
+    {
+      "name": "Custom Hekate OFW Image",
+      "mode": "local_root",
+      "source": "assets/bootloader/res/ofw.bmp",
+      "destination": "bootloader/res/ofw.bmp"
+    },
+    {
+      "name": "Custom Hekate Stock Image",
+      "mode": "local_root",
+      "source": "assets/bootloader/res/stock.bmp",
+      "destination": "bootloader/res/stock.bmp"
+    },
+    {
+      "name": "Custom Hekate Configuration",
+      "mode": "local_root",
+      "source": "assets/bootloader/hekate_ipl.ini",
+      "destination": "bootloader/hekate_ipl.ini"
     },
     {
       "name": "HATS-Tools",
@@ -52,13 +67,6 @@
       "repo": "ITotalJustice/sphaira",
       "asset_regex": "^sphaira\\.zip$",
       "mode": "zip"
-    },
-    {
-      "name": "Switch 90DNS Tester",
-      "repo": "meganukebmp/Switch_90DNS_tester",
-      "asset_regex": ".*\\.nro$",
-      "mode": "nro",
-      "destination": "switch/90DNSTester.nro"
     },
     {
       "name": "Tinwoo Installer",
