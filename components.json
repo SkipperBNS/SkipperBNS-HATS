@@ -27,12 +27,6 @@
       "destination": "bootloader/res/background.bmp"
     },
     {
-      "name": "Custom Hekate sysMMC Image",
-      "mode": "local_root",
-      "source": "assets/bootloader/res/sysmmc.bmp",
-      "destination": "bootloader/res/sysmmc.bmp"
-    },
-    {
       "name": "Custom Hekate emuMMC Image",
       "mode": "local_root",
       "source": "assets/bootloader/res/emummc.bmp",
@@ -43,12 +37,6 @@
       "mode": "local_root",
       "source": "assets/bootloader/res/ofw.bmp",
       "destination": "bootloader/res/ofw.bmp"
-    },
-    {
-      "name": "Custom Hekate Stock Image",
-      "mode": "local_root",
-      "source": "assets/bootloader/res/stock.bmp",
-      "destination": "bootloader/res/stock.bmp"
     },
     {
       "name": "Custom Hekate Configuration",
