@@ -18,13 +18,8 @@ $Pack = Join-Path $Root "pack"
 $Work = Join-Path $Root "work"
 $ComponentsFile = Join-Path $Root "components.json"
 
-Write-Host "Root: $Root"
-Write-Host "Pack: $Pack"
-Write-Host "Work: $Work"
-Write-Host ""
-
 # ------------------------------------------------------------
-# CLEAN BUILD DIRECTORIES
+# CLEAN BUILD
 # ------------------------------------------------------------
 
 Write-Host "Cleaning previous build..."
@@ -44,28 +39,22 @@ Write-Host "Build directories ready."
 Write-Host ""
 
 # ------------------------------------------------------------
-# CHECK COMPONENTS
+# LOAD COMPONENTS
 # ------------------------------------------------------------
 
-if (-not (Test-Path $ComponentsFile)) {
+if (-not (Test-Path $ComponentsFile -PathType Leaf)) {
     throw "components.json was not found: $ComponentsFile"
 }
 
 try {
-    $ConfigText = Get-Content $ComponentsFile -Raw -ErrorAction Stop
-
-    if ([string]::IsNullOrWhiteSpace($ConfigText)) {
-        throw "components.json is empty."
-    }
-
-    $Config = $ConfigText | ConvertFrom-Json -ErrorAction Stop
+    $Config = Get-Content $ComponentsFile -Raw | ConvertFrom-Json
 }
 catch {
     throw "Could not parse components.json. $($_.Exception.Message)"
 }
 
 if ($null -eq $Config.components) {
-    throw "components.json does not contain a 'components' array."
+    throw "components.json does not contain a components array."
 }
 
 Write-Host "Components configured: $($Config.components.Count)"
@@ -98,13 +87,11 @@ Write-Host ""
 
 function Get-LatestRelease {
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Repo
     )
 
     $Url = "https://api.github.com/repos/$Repo/releases/latest"
-
-    Write-Host "Checking latest release..."
 
     for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
 
@@ -134,10 +121,10 @@ function Get-LatestRelease {
 
 function Find-Asset {
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [object]$Release,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Regex
     )
 
@@ -152,15 +139,15 @@ function Find-Asset {
 }
 
 # ------------------------------------------------------------
-# DOWNLOAD ASSET
+# DOWNLOAD
 # ------------------------------------------------------------
 
 function Download-Asset {
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [object]$Asset,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Destination
     )
 
@@ -173,17 +160,17 @@ function Download-Asset {
         -UseBasicParsing `
         -ErrorAction Stop
 
-    if (-not (Test-Path $Destination)) {
+    if (-not (Test-Path $Destination -PathType Leaf)) {
         throw "Download failed: $Destination"
     }
 
-    $DownloadedFile = Get-Item $Destination
+    $File = Get-Item $Destination
 
-    if ($DownloadedFile.Length -le 0) {
+    if ($File.Length -le 0) {
         throw "Downloaded file is empty: $Destination"
     }
 
-    Write-Host "Downloaded: $($DownloadedFile.Length) bytes"
+    Write-Host "Downloaded: $($File.Length) bytes"
 }
 
 # ------------------------------------------------------------
@@ -192,15 +179,12 @@ function Download-Asset {
 
 function Install-Zip {
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$ZipPath,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Destination
     )
-
-    Write-Host "Extracting ZIP:"
-    Write-Host "  $ZipPath"
 
     Expand-Archive `
         -Path $ZipPath `
@@ -215,20 +199,17 @@ function Install-Zip {
 
 function Install-File {
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Source,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Destination
     )
 
-    $DestinationFolder = Split-Path $Destination -Parent
+    $Folder = Split-Path $Destination -Parent
 
-    if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
-        New-Item `
-            -ItemType Directory `
-            -Path $DestinationFolder `
-            -Force | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($Folder)) {
+        New-Item -ItemType Directory -Path $Folder -Force | Out-Null
     }
 
     Copy-Item `
@@ -237,119 +218,19 @@ function Install-File {
         -Force `
         -ErrorAction Stop
 
-    Write-Host "Installed:"
-    Write-Host "  $Destination"
+    Write-Host "Installed: $Destination"
 }
 
 # ------------------------------------------------------------
-# INSTALL CUSTOM BOOTLOADER RESOURCES
-# ------------------------------------------------------------
-
-function Install-CustomBootloaderResources {
-
-    Write-Host ""
-    Write-Host "========================================"
-    Write-Host "Installing custom bootloader resources"
-    Write-Host "========================================"
-
-    $ResourceSource = Join-Path $Root "assets\bootloader\res"
-    $ResourceDestination = Join-Path $Pack "bootloader\res"
-
-    if (-not (Test-Path $ResourceSource -PathType Container)) {
-        throw "Custom bootloader resource directory not found: $ResourceSource"
-    }
-
-    New-Item `
-        -ItemType Directory `
-        -Path $ResourceDestination `
-        -Force | Out-Null
-
-    $RequiredResources = @(
-        "background.bmp",
-        "emummc.bmp",
-        "ofw.bmp"
-    )
-
-    foreach ($ResourceName in $RequiredResources) {
-
-        $Source = Join-Path $ResourceSource $ResourceName
-        $Destination = Join-Path $ResourceDestination $ResourceName
-
-        if (-not (Test-Path $Source -PathType Leaf)) {
-            throw "Required bootloader resource not found: $Source"
-        }
-
-        $File = Get-Item $Source
-
-        if ($File.Length -le 0) {
-            throw "Bootloader resource is empty: $Source"
-        }
-
-        Copy-Item `
-            -LiteralPath $Source `
-            -Destination $Destination `
-            -Force `
-            -ErrorAction Stop
-
-        Write-Host "Installed: bootloader\res\$ResourceName"
-        Write-Host "Size: $($File.Length) bytes"
-    }
-
-    Write-Host ""
-    Write-Host "All custom bootloader resources installed successfully."
-}
-
-# ------------------------------------------------------------
-# INSTALL CUSTOM HEKATE CONFIGURATION
-# ------------------------------------------------------------
-
-function Install-CustomHekateConfig {
-
-    Write-Host ""
-    Write-Host "========================================"
-    Write-Host "Installing custom Hekate configuration"
-    Write-Host "========================================"
-
-    $ConfigSource = Join-Path $Root "assets\bootloader\hekate_ipl.ini"
-    $ConfigDestination = Join-Path $Pack "bootloader\hekate_ipl.ini"
-
-    if (-not (Test-Path $ConfigSource -PathType Leaf)) {
-        throw "Custom hekate_ipl.ini not found: $ConfigSource"
-    }
-
-    $ConfigFile = Get-Item $ConfigSource
-
-    if ($ConfigFile.Length -le 0) {
-        throw "Custom hekate_ipl.ini is empty."
-    }
-
-    $BootloaderDirectory = Split-Path $ConfigDestination -Parent
-
-    New-Item `
-        -ItemType Directory `
-        -Path $BootloaderDirectory `
-        -Force | Out-Null
-
-    Copy-Item `
-        -LiteralPath $ConfigSource `
-        -Destination $ConfigDestination `
-        -Force `
-        -ErrorAction Stop
-
-    Write-Host "Installed:"
-    Write-Host "  bootloader\hekate_ipl.ini"
-}
-
-# ------------------------------------------------------------
-# MERGE DIRECTORY CONTENTS
+# MERGE DIRECTORIES
 # ------------------------------------------------------------
 
 function Merge-DirectoryContents {
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Source,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Destination
     )
 
@@ -357,36 +238,24 @@ function Merge-DirectoryContents {
         throw "Source directory does not exist: $Source"
     }
 
-    New-Item `
-        -ItemType Directory `
-        -Path $Destination `
-        -Force | Out-Null
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 
-    $Items = @(Get-ChildItem -LiteralPath $Source -Force)
-
-    foreach ($Item in $Items) {
+    foreach ($Item in @(Get-ChildItem -LiteralPath $Source -Force)) {
 
         $Target = Join-Path $Destination $Item.Name
 
         if ($Item.PSIsContainer) {
 
-            if (Test-Path $Target -PathType Container) {
-                Merge-DirectoryContents `
-                    -Source $Item.FullName `
-                    -Destination $Target
+            if (-not (Test-Path $Target)) {
+                New-Item -ItemType Directory -Path $Target -Force | Out-Null
             }
-            else {
-                New-Item `
-                    -ItemType Directory `
-                    -Path $Target `
-                    -Force | Out-Null
 
-                Merge-DirectoryContents `
-                    -Source $Item.FullName `
-                    -Destination $Target
-            }
+            Merge-DirectoryContents `
+                -Source $Item.FullName `
+                -Destination $Target
         }
         else {
+
             Copy-Item `
                 -LiteralPath $Item.FullName `
                 -Destination $Target `
@@ -402,29 +271,25 @@ function Merge-DirectoryContents {
 
 function Install-HatsBase {
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$ZipPath,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$Destination
     )
 
-    $ExtractPath = Join-Path $Work "HATS-Base-Extract"
+    $ExtractPath = Join-Path $Work "HATS-Base"
 
     if (Test-Path $ExtractPath) {
         Remove-Item $ExtractPath -Recurse -Force
     }
 
-    New-Item `
-        -ItemType Directory `
-        -Path $ExtractPath `
-        -Force | Out-Null
+    New-Item -ItemType Directory -Path $ExtractPath -Force | Out-Null
 
     Install-Zip `
         -ZipPath $ZipPath `
         -Destination $ExtractPath
 
-    Write-Host ""
     Write-Host "Inspecting HATS base..."
 
     $SdOut = Get-ChildItem `
@@ -440,9 +305,7 @@ function Install-HatsBase {
     if ($null -ne $SdOut) {
 
         Write-Host "Found SdOut:"
-        Write-Host "  $($SdOut.FullName)"
-
-        Write-Host "Merging SdOut contents into pack..."
+        Write-Host $SdOut.FullName
 
         Merge-DirectoryContents `
             -Source $SdOut.FullName `
@@ -451,11 +314,7 @@ function Install-HatsBase {
         return
     }
 
-    $RootEntries = @(
-        Get-ChildItem `
-            -LiteralPath $ExtractPath `
-            -Force
-    )
+    $RootEntries = @(Get-ChildItem -LiteralPath $ExtractPath -Force)
 
     $LooksLikeSdRoot = $false
 
@@ -466,10 +325,8 @@ function Install-HatsBase {
             $Entry.Name -ieq "bootloader" -or
             $Entry.Name -ieq "switch" -or
             $Entry.Name -ieq "boot.dat" -or
-            $Entry.Name -ieq "boot.ini" -or
             $Entry.Name -ieq "payload.bin" -or
-            $Entry.Name -ieq "exosphere.ini" -or
-            $Entry.Name -ieq "manifest.json"
+            $Entry.Name -ieq "exosphere.ini"
         ) {
             $LooksLikeSdRoot = $true
             break
@@ -478,9 +335,6 @@ function Install-HatsBase {
 
     if ($LooksLikeSdRoot) {
 
-        Write-Host "HATS archive already contains SD root contents."
-        Write-Host "Merging archive root into pack..."
-
         Merge-DirectoryContents `
             -Source $ExtractPath `
             -Destination $Destination
@@ -488,50 +342,36 @@ function Install-HatsBase {
         return
     }
 
-    throw "Could not locate the HATS SD contents or SdOut directory."
+    throw "Could not locate HATS SD contents or SdOut."
 }
 
 # ------------------------------------------------------------
-# NORMALIZE NESTED BOOTLOADER
+# NORMALIZE BOOTLOADER
 # ------------------------------------------------------------
 
 function Normalize-Bootloader {
 
-    Write-Host ""
-    Write-Host "========================================"
-    Write-Host "Normalizing bootloader structure"
-    Write-Host "========================================"
-
     $Bootloader = Join-Path $Pack "bootloader"
 
     if (-not (Test-Path $Bootloader -PathType Container)) {
-        Write-Host "No bootloader directory found."
         return
     }
 
     while ($true) {
 
-        $NestedBootloader = Join-Path $Bootloader "bootloader"
+        $Nested = Join-Path $Bootloader "bootloader"
 
-        if (-not (Test-Path $NestedBootloader -PathType Container)) {
+        if (-not (Test-Path $Nested -PathType Container)) {
             break
         }
 
-        Write-Host "Found nested bootloader:"
-        Write-Host "  $NestedBootloader"
-
-        $Items = @(Get-ChildItem -LiteralPath $NestedBootloader -Force)
-
-        foreach ($Item in $Items) {
+        foreach ($Item in @(Get-ChildItem -LiteralPath $Nested -Force)) {
 
             $Target = Join-Path $Bootloader $Item.Name
 
             if ($Item.PSIsContainer) {
 
                 if (Test-Path $Target -PathType Container) {
-
-                    Write-Host "Merging directory:"
-                    Write-Host "  $($Item.Name)"
 
                     Merge-DirectoryContents `
                         -Source $Item.FullName `
@@ -544,26 +384,18 @@ function Normalize-Bootloader {
                 }
                 else {
 
-                    Write-Host "Moving directory:"
-                    Write-Host "  $($Item.Name)"
-
                     Move-Item `
                         -LiteralPath $Item.FullName `
                         -Destination $Target `
-                        -Force `
-                        -ErrorAction Stop
+                        -Force
                 }
             }
             else {
 
-                Write-Host "Moving file:"
-                Write-Host "  $($Item.Name)"
-
                 Copy-Item `
                     -LiteralPath $Item.FullName `
                     -Destination $Target `
-                    -Force `
-                    -ErrorAction Stop
+                    -Force
 
                 Remove-Item `
                     -LiteralPath $Item.FullName `
@@ -571,27 +403,20 @@ function Normalize-Bootloader {
             }
         }
 
-        if (Test-Path $NestedBootloader) {
-            Remove-Item `
-                -LiteralPath $NestedBootloader `
-                -Recurse `
-                -Force
-        }
+        Remove-Item `
+            -LiteralPath $Nested `
+            -Recurse `
+            -Force
     }
-
-    Write-Host "Bootloader structure is clean."
 }
 
 # ------------------------------------------------------------
-# REMOVE SdOut DIRECTORIES
+# REMOVE SDOUT
 # ------------------------------------------------------------
 
 function Remove-SdOutDirectories {
 
-    Write-Host ""
-    Write-Host "Checking for unwanted SdOut directories..."
-
-    $SdOutDirectories = @(
+    $Directories = @(
         Get-ChildItem `
             -Path $Pack `
             -Directory `
@@ -602,35 +427,277 @@ function Remove-SdOutDirectories {
         }
     )
 
-    foreach ($Directory in $SdOutDirectories) {
-
-        Write-Host "Removing:"
-        Write-Host "  $($Directory.FullName)"
+    foreach ($Directory in $Directories) {
 
         Remove-Item `
             -LiteralPath $Directory.FullName `
             -Recurse `
             -Force
     }
+}
 
-    if ($SdOutDirectories.Count -eq 0) {
-        Write-Host "No unwanted SdOut directories found."
+# ------------------------------------------------------------
+# CLEAN DUPLICATE HOMEBREW NRO
+# ------------------------------------------------------------
+
+function Clean-DuplicateHomebrewApps {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Cleaning duplicate Homebrew NRO files"
+    Write-Host "========================================"
+
+    $SwitchPath = Join-Path $Pack "switch"
+
+    if (-not (Test-Path $SwitchPath -PathType Container)) {
+        Write-Host "No switch folder found."
+        return
+    }
+
+    # These four applications have one canonical NRO.
+    $Canonical = @{
+        "90DNS" = "90DNSTester.nro"
+        "Goldleaf" = "Goldleaf.nro"
+        "JKSV" = "JKSV.nro"
+        "NXThemesInstaller" = "NXThemesInstaller.nro"
+    }
+
+    $Patterns = @{
+        "90DNS" = "*90DNS*.nro"
+        "Goldleaf" = "*Goldleaf*.nro"
+        "JKSV" = "*JKSV*.nro"
+        "NXThemesInstaller" = "*NXThemes*.nro"
+    }
+
+    foreach ($Name in $Patterns.Keys) {
+
+        $CanonicalName = $Canonical[$Name]
+        $CanonicalPath = Join-Path $SwitchPath $CanonicalName
+
+        Write-Host ""
+        Write-Host "Checking $Name..."
+
+        $Files = @(
+            Get-ChildItem `
+                -Path $SwitchPath `
+                -Recurse `
+                -File `
+                -Filter "*.nro" `
+                -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -like $Patterns[$Name]
+            }
+        )
+
+        if (Test-Path $CanonicalPath -PathType Leaf) {
+
+            foreach ($File in $Files) {
+
+                if ($File.FullName -ieq $CanonicalPath) {
+                    Write-Host "KEEP: $CanonicalName"
+                }
+                else {
+
+                    Write-Host "REMOVE DUPLICATE: $($File.FullName)"
+
+                    Remove-Item `
+                        -LiteralPath $File.FullName `
+                        -Force
+                }
+            }
+        }
+        elseif ($Files.Count -gt 0) {
+
+            $Candidate = $Files |
+                Where-Object {
+                    $_.Directory.FullName -ieq $SwitchPath
+                } |
+                Select-Object -First 1
+
+            if ($null -eq $Candidate) {
+                $Candidate = $Files | Select-Object -First 1
+            }
+
+            Write-Host "Creating canonical file: $CanonicalName"
+
+            if ($Candidate.Name -ne $CanonicalName) {
+
+                Rename-Item `
+                    -LiteralPath $Candidate.FullName `
+                    -NewName $CanonicalName `
+                    -Force
+            }
+
+            $CanonicalPath = Join-Path $SwitchPath $CanonicalName
+
+            foreach ($File in @(
+                Get-ChildItem `
+                    -Path $SwitchPath `
+                    -Recurse `
+                    -File `
+                    -Filter "*.nro" `
+                    -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.Name -like $Patterns[$Name]
+                }
+            )) {
+
+                if ($File.FullName -ine $CanonicalPath) {
+
+                    Write-Host "REMOVE DUPLICATE: $($File.FullName)"
+
+                    Remove-Item `
+                        -LiteralPath $File.FullName `
+                        -Force
+                }
+            }
+        }
+    }
+
+    # --------------------------------------------------------
+    # EdiZon / Ultrahand / nx-ovlloader
+    # --------------------------------------------------------
+    # Only remove NRO files.
+    # Do NOT touch .ovl files or Atmosphere/system files.
+    # --------------------------------------------------------
+
+    $ExtraNroPatterns = @(
+        "*EdiZon*.nro",
+        "*Ultrahand*.nro",
+        "*nx-ovlloader*.nro"
+    )
+
+    foreach ($Pattern in $ExtraNroPatterns) {
+
+        $Files = @(
+            Get-ChildItem `
+                -Path $SwitchPath `
+                -Recurse `
+                -File `
+                -Filter "*.nro" `
+                -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -like $Pattern
+            }
+        )
+
+        foreach ($File in $Files) {
+
+            Write-Host "REMOVE EXTRA NRO: $($File.FullName)"
+
+            Remove-Item `
+                -LiteralPath $File.FullName `
+                -Force
+        }
+    }
+
+    # --------------------------------------------------------
+    # REMOVE EMPTY DIRECTORIES
+    # --------------------------------------------------------
+
+    $EmptyDirectories = @(
+        Get-ChildItem `
+            -Path $SwitchPath `
+            -Directory `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        Where-Object {
+            @(Get-ChildItem -LiteralPath $_.FullName -Force).Count -eq 0
+        }
+    )
+
+    foreach ($Directory in $EmptyDirectories) {
+
+        Remove-Item `
+            -LiteralPath $Directory.FullName `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ""
+    Write-Host "Duplicate NRO cleanup completed."
+}
+
+# ------------------------------------------------------------
+# CUSTOM BOOTLOADER RESOURCES
+# ------------------------------------------------------------
+
+function Install-CustomBootloaderResources {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Installing custom Hekate resources"
+    Write-Host "========================================"
+
+    $Source = Join-Path $Root "assets\bootloader\res"
+    $Destination = Join-Path $Pack "bootloader\res"
+
+    if (-not (Test-Path $Source -PathType Container)) {
+        throw "Custom bootloader resource folder not found: $Source"
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $Destination `
+        -Force | Out-Null
+
+    $Images = @(
+        "background.bmp",
+        "emummc.bmp",
+        "ofw.bmp"
+    )
+
+    foreach ($Image in $Images) {
+
+        $SourceFile = Join-Path $Source $Image
+        $DestinationFile = Join-Path $Destination $Image
+
+        if (-not (Test-Path $SourceFile -PathType Leaf)) {
+            throw "Required custom bootloader image not found: $SourceFile"
+        }
+
+        $File = Get-Item $SourceFile
+
+        if ($File.Length -le 0) {
+            throw "Custom bootloader image is empty: $SourceFile"
+        }
+
+        Copy-Item `
+            -LiteralPath $SourceFile `
+            -Destination $DestinationFile `
+            -Force
+
+        Write-Host "OK: bootloader\res\$Image"
     }
 }
 
 # ------------------------------------------------------------
-# VERIFY NO NESTED BOOTLOADER
+# CUSTOM HEKATE CONFIG
 # ------------------------------------------------------------
 
-function Verify-Bootloader {
+function Install-CustomHekateConfig {
 
-    $NestedBootloader = Join-Path $Pack "bootloader\bootloader"
+    $Source = Join-Path $Root "assets\bootloader\hekate_ipl.ini"
+    $Destination = Join-Path $Pack "bootloader\hekate_ipl.ini"
 
-    if (Test-Path $NestedBootloader -PathType Container) {
-        throw "Nested bootloader directory still exists: $NestedBootloader"
+    if (-not (Test-Path $Source -PathType Leaf)) {
+        throw "Custom hekate_ipl.ini not found: $Source"
     }
 
-    Write-Host "OK: No nested bootloader directory found."
+    $Folder = Split-Path $Destination -Parent
+
+    New-Item `
+        -ItemType Directory `
+        -Path $Folder `
+        -Force | Out-Null
+
+    Copy-Item `
+        -LiteralPath $Source `
+        -Destination $Destination `
+        -Force
+
+    Write-Host "OK: bootloader\hekate_ipl.ini"
 }
 
 # ------------------------------------------------------------
@@ -654,25 +721,16 @@ foreach ($Component in $Config.components) {
         throw "Component '$($Component.name)' has no mode."
     }
 
-    Write-Host "Mode: $($Component.mode)"
+    # --------------------------------------------------------
+    # LOCAL ROOT
+    # --------------------------------------------------------
 
     if ($Component.mode -eq "local_root") {
-
-        if ([string]::IsNullOrWhiteSpace($Component.source)) {
-            throw "Component '$($Component.name)' has no source."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-            throw "Component '$($Component.name)' has no destination."
-        }
 
         $Source = Join-Path $Root $Component.source
         $Destination = Join-Path $Pack $Component.destination
 
-        Write-Host "Local source:"
-        Write-Host "  $Source"
-
-        if (-not (Test-Path $Source)) {
+        if (-not (Test-Path $Source -PathType Leaf)) {
             throw "Local file was not found: $Source"
         }
 
@@ -683,25 +741,13 @@ foreach ($Component in $Config.components) {
         continue
     }
 
+    # --------------------------------------------------------
+    # HATS BASE
+    # --------------------------------------------------------
+
     if ($Component.mode -eq "hats_base") {
 
-        if ([string]::IsNullOrWhiteSpace($Component.repo)) {
-            throw "Component '$($Component.name)' has no repository."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($Component.asset_regex)) {
-            throw "Component '$($Component.name)' has no asset_regex."
-        }
-
-        Write-Host "Repository: $($Component.repo)"
-
         $Release = Get-LatestRelease $Component.repo
-
-        if ($null -eq $Release) {
-            throw "No release information returned for $($Component.repo)"
-        }
-
-        Write-Host "Release: $($Release.tag_name)"
 
         $Asset = Find-Asset `
             -Release $Release `
@@ -709,20 +755,14 @@ foreach ($Component in $Config.components) {
 
         if ($null -eq $Asset) {
 
-            Write-Host ""
-            Write-Host "ERROR: No matching HATS asset found." -ForegroundColor Red
-            Write-Host "Required pattern: $($Component.asset_regex)"
-            Write-Host ""
             Write-Host "Available assets:"
 
             foreach ($Available in @($Release.assets)) {
                 Write-Host "  $($Available.name)"
             }
 
-            throw "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
+            throw "Could not find HATS asset matching '$($Component.asset_regex)'"
         }
-
-        Write-Host "Asset: $($Asset.name)"
 
         $DownloadPath = Join-Path $Work $Asset.name
 
@@ -737,23 +777,11 @@ foreach ($Component in $Config.components) {
         continue
     }
 
-    if ([string]::IsNullOrWhiteSpace($Component.repo)) {
-        throw "Component '$($Component.name)' has no repository."
-    }
-
-    if ([string]::IsNullOrWhiteSpace($Component.asset_regex)) {
-        throw "Component '$($Component.name)' has no asset_regex."
-    }
-
-    Write-Host "Repository: $($Component.repo)"
+    # --------------------------------------------------------
+    # GITHUB COMPONENT
+    # --------------------------------------------------------
 
     $Release = Get-LatestRelease $Component.repo
-
-    if ($null -eq $Release) {
-        throw "No release information returned for $($Component.repo)"
-    }
-
-    Write-Host "Release: $($Release.tag_name)"
 
     $Asset = Find-Asset `
         -Release $Release `
@@ -761,23 +789,17 @@ foreach ($Component in $Config.components) {
 
     if ($null -eq $Asset) {
 
-        Write-Host ""
-        Write-Host "ERROR: No matching asset found." -ForegroundColor Red
-        Write-Host "Required pattern: $($Component.asset_regex)"
-        Write-Host ""
         Write-Host "Available assets:"
 
         foreach ($Available in @($Release.assets)) {
             Write-Host "  $($Available.name)"
         }
 
-        throw "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
+        throw "Could not find asset matching '$($Component.asset_regex)'"
     }
 
-    Write-Host "Asset: $($Asset.name)"
-
-    $SafeAssetName = $Asset.name -replace '[\\/:*?"<>|]', '_'
-    $DownloadPath = Join-Path $Work "$Index-$SafeAssetName"
+    $SafeName = $Asset.name -replace '[\\/:*?"<>|]', '_'
+    $DownloadPath = Join-Path $Work "$Index-$SafeName"
 
     Download-Asset `
         -Asset $Asset `
@@ -805,16 +827,10 @@ foreach ($Component in $Config.components) {
             Merge-DirectoryContents `
                 -Source $ExtractPath `
                 -Destination $Pack
-
-            continue
         }
 
         "nro" {
 
-            if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-                throw "Component '$($Component.name)' has no destination."
-            }
-
             $Destination = Join-Path `
                 $Pack `
                 $Component.destination
@@ -822,35 +838,20 @@ foreach ($Component in $Config.components) {
             Install-File `
                 -Source $DownloadPath `
                 -Destination $Destination
-
-            continue
         }
 
         "ovl" {
 
-            if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-                throw "Component '$($Component.name)' has no destination."
-            }
-
-            $OverlayDestination = $Component.destination `
-                -replace '^switch[\\/]\.overlays[\\/]', 'switch\.overlays\'
-
             $Destination = Join-Path `
                 $Pack `
-                $OverlayDestination
+                $Component.destination
 
             Install-File `
                 -Source $DownloadPath `
                 -Destination $Destination
-
-            continue
         }
 
         "file" {
-
-            if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-                throw "Component '$($Component.name)' has no destination."
-            }
 
             $Destination = Join-Path `
                 $Pack `
@@ -859,202 +860,137 @@ foreach ($Component in $Config.components) {
             Install-File `
                 -Source $DownloadPath `
                 -Destination $Destination
-
-            continue
         }
 
         default {
-            throw "Unknown component mode '$($Component.mode)' for $($Component.name)"
+            throw "Unknown component mode '$($Component.mode)'"
         }
     }
 }
 
 # ------------------------------------------------------------
-# NORMALIZE FINAL PACK
+# FINAL NORMALIZATION
 # ------------------------------------------------------------
 
 Normalize-Bootloader
 Remove-SdOutDirectories
-Verify-Bootloader
+
+$NestedBootloader = Join-Path $Pack "bootloader\bootloader"
+
+if (Test-Path $NestedBootloader -PathType Container) {
+    throw "Nested bootloader directory still exists: $NestedBootloader"
+}
 
 # ------------------------------------------------------------
-# INSTALL CUSTOM BOOTLOADER RESOURCES
+# CLEAN DUPLICATE NRO FILES
+# ------------------------------------------------------------
+
+Clean-DuplicateHomebrewApps
+
+# ------------------------------------------------------------
+# CUSTOM HEKATE FILES
 # ------------------------------------------------------------
 
 Install-CustomBootloaderResources
 Install-CustomHekateConfig
 
 # ------------------------------------------------------------
-# VERIFY REQUIRED LOCAL FILES
+# VERIFY LOCAL APPS
 # ------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "Verifying required local applications"
+Write-Host "Verifying required applications"
 Write-Host "========================================"
 
-$RequiredLocalFiles = @(
+$RequiredApps = @(
     "switch\ftpd.nro",
     "switch\checkpoint.nro"
 )
 
-foreach ($RelativePath in $RequiredLocalFiles) {
+foreach ($App in $RequiredApps) {
 
-    $RequiredPath = Join-Path $Pack $RelativePath
+    $Path = Join-Path $Pack $App
 
-    if (-not (Test-Path $RequiredPath)) {
-        throw "Required file missing from final pack: $RelativePath"
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        throw "Required file missing: $App"
     }
 
-    $RequiredFile = Get-Item $RequiredPath
-
-    if ($RequiredFile.Length -le 0) {
-        throw "Required file is empty: $RelativePath"
-    }
-
-    Write-Host "OK: $RelativePath"
+    Write-Host "OK: $App"
 }
 
 # ------------------------------------------------------------
-# VERIFY CUSTOM BOOTLOADER RESOURCES
+# VERIFY HEKATE IMAGES
 # ------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "Verifying custom bootloader resources"
+Write-Host "Verifying Hekate resources"
 Write-Host "========================================"
 
-$BootloaderResPath = Join-Path $Pack "bootloader\res"
-
-$RequiredBootloaderResources = @(
+$Images = @(
     "background.bmp",
     "emummc.bmp",
     "ofw.bmp"
 )
 
-foreach ($ResourceName in $RequiredBootloaderResources) {
+foreach ($Image in $Images) {
 
-    $ResourcePath = Join-Path $BootloaderResPath $ResourceName
+    $Path = Join-Path $Pack "bootloader\res\$Image"
 
-    if (-not (Test-Path $ResourcePath -PathType Leaf)) {
-        throw "Required bootloader resource missing: bootloader\res\$ResourceName"
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        throw "Required bootloader image missing: $Image"
     }
 
-    $ResourceFile = Get-Item $ResourcePath
+    $File = Get-Item $Path
 
-    if ($ResourceFile.Length -le 0) {
-        throw "Bootloader resource is empty: $ResourceName"
+    if ($File.Length -le 0) {
+        throw "Bootloader image is empty: $Image"
     }
 
-    Write-Host "OK: bootloader\res\$ResourceName"
-    Write-Host "Size: $($ResourceFile.Length) bytes"
+    Write-Host "OK: bootloader\res\$Image"
 }
 
 # ------------------------------------------------------------
-# VERIFY CUSTOM HEKATE CONFIGURATION
+# VERIFY HEKATE CONFIG
 # ------------------------------------------------------------
 
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Verifying custom Hekate configuration"
-Write-Host "========================================"
+$HekateConfig = Join-Path $Pack "bootloader\hekate_ipl.ini"
 
-$HekateConfigPath = Join-Path $Pack "bootloader\hekate_ipl.ini"
-
-if (-not (Test-Path $HekateConfigPath -PathType Leaf)) {
-    throw "Custom hekate_ipl.ini is missing."
-}
-
-$HekateConfigFile = Get-Item $HekateConfigPath
-
-if ($HekateConfigFile.Length -le 0) {
-    throw "Custom hekate_ipl.ini is empty."
+if (-not (Test-Path $HekateConfig -PathType Leaf)) {
+    throw "bootloader\hekate_ipl.ini is missing."
 }
 
 Write-Host "OK: bootloader\hekate_ipl.ini"
-Write-Host "Size: $($HekateConfigFile.Length) bytes"
 
 # ------------------------------------------------------------
-# VERIFY IMPORTANT HATS FILES
-# ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Verifying HATS base files"
-Write-Host "========================================"
-
-$ImportantFiles = @(
-    "boot.dat",
-    "boot.ini",
-    "exosphere.ini",
-    "manifest.json",
-    "payload.bin"
-)
-
-foreach ($RelativePath in $ImportantFiles) {
-
-    $CheckPath = Join-Path $Pack $RelativePath
-
-    if (Test-Path $CheckPath) {
-        Write-Host "OK: $RelativePath"
-    }
-    else {
-        Write-Host "WARNING: $RelativePath not found"
-    }
-}
-
-# ------------------------------------------------------------
-# VERIFY PACK
+# SHOW FINAL SWITCH NROS
 # ------------------------------------------------------------
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "Verifying final pack"
+Write-Host "Final Switch NRO files"
 Write-Host "========================================"
 
-if (-not (Test-Path $Pack -PathType Container)) {
-    throw "Pack directory does not exist."
-}
+$SwitchPath = Join-Path $Pack "switch"
 
-$PackFiles = @(
-    Get-ChildItem `
-        -Path $Pack `
-        -Recurse `
-        -File
-)
-
-if ($PackFiles.Count -eq 0) {
-    throw "Pack directory is empty."
-}
-
-Write-Host "Files in pack: $($PackFiles.Count)"
-
-# ------------------------------------------------------------
-# SHOW FINAL BOOTLOADER STRUCTURE
-# ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "Final bootloader structure"
-Write-Host "========================================"
-
-$FinalBootloader = Join-Path $Pack "bootloader"
-
-if (Test-Path $FinalBootloader -PathType Container) {
+if (Test-Path $SwitchPath -PathType Container) {
 
     Get-ChildItem `
-        -Path $FinalBootloader `
+        -Path $SwitchPath `
         -Recurse `
-        -Force |
-        Select-Object FullName |
-        Format-Table -AutoSize
-}
-else {
-    Write-Host "WARNING: bootloader directory does not exist."
+        -File `
+        -Filter "*.nro" |
+        ForEach-Object {
+
+            $Relative = $_.FullName.Substring($Pack.Length).TrimStart('\','/')
+
+            Write-Host $Relative
+        }
 }
 
 # ------------------------------------------------------------
-# CREATE FINAL ZIP
+# CREATE ZIP
 # ------------------------------------------------------------
 
 $Output = Join-Path `
@@ -1076,7 +1012,7 @@ Compress-Archive `
     -Force `
     -ErrorAction Stop
 
-if (-not (Test-Path $Output)) {
+if (-not (Test-Path $Output -PathType Leaf)) {
     throw "Final ZIP was not created."
 }
 
@@ -1098,15 +1034,4 @@ Write-Host "========================================"
 Write-Host "Output: $($OutputFile.FullName)"
 Write-Host "Size:   $($OutputFile.Length) bytes"
 Write-Host ""
-
-Write-Host "Pack contents:"
-
-Get-ChildItem `
-    -Path $Pack `
-    -Recurse `
-    -File |
-    Select-Object FullName, Length |
-    Format-Table -AutoSize
-
-Write-Host ""
-Write-Host "Build completed successfully."
+Write-Host "SkipperBNS HATS build completed successfully."
