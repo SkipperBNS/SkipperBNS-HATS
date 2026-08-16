@@ -17,6 +17,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 $Pack = Join-Path $Root "pack"
 $Work = Join-Path $Root "work"
 $ComponentsFile = Join-Path $Root "components.json"
+$DuplicateReport = Join-Path $Root "DUPLICATES.txt"
 
 Write-Host "Root: $Root"
 Write-Host "Pack: $Pack"
@@ -39,11 +40,120 @@ if (Test-Path $Pack) {
     Remove-Item $Pack -Recurse -Force
 }
 
+if (Test-Path $DuplicateReport) {
+    Remove-Item $DuplicateReport -Force
+}
+
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 New-Item -ItemType Directory -Path $Pack -Force | Out-Null
 
 Write-Host "Build directories ready."
 Write-Host ""
+
+# ============================================================
+# DUPLICATE TRACKING
+# ============================================================
+
+$FileOwners = @{}
+$DuplicateFiles = @()
+
+$CurrentComponent = "Unknown"
+
+function Normalize-RelativePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $Normalized = $Path.Replace("\", "/").TrimStart("/")
+
+    return $Normalized
+}
+
+function Get-RelativePackPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FullPath
+    )
+
+    $PackFull = [System.IO.Path]::GetFullPath($Pack)
+    $FileFull = [System.IO.Path]::GetFullPath($FullPath)
+
+    if ($FileFull.StartsWith($PackFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $Relative = $FileFull.Substring($PackFull.Length)
+        return (Normalize-RelativePath $Relative)
+    }
+
+    return (Normalize-RelativePath $FullPath)
+}
+
+function Register-FileOwner {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Owner
+    )
+
+    $RelativePath = Get-RelativePackPath $FilePath
+
+    if ($FileOwners.ContainsKey($RelativePath)) {
+
+        $PreviousOwner = $FileOwners[$RelativePath]
+
+        $DuplicateFiles += [PSCustomObject]@{
+            Path          = $RelativePath
+            FirstComponent = $PreviousOwner
+            SecondComponent = $Owner
+        }
+
+        Write-Host ""
+        Write-Host "DUPLICATE FILE DETECTED" -ForegroundColor Yellow
+        Write-Host "  Path:      $RelativePath" -ForegroundColor Yellow
+        Write-Host "  First:     $PreviousOwner" -ForegroundColor Yellow
+        Write-Host "  Current:   $Owner" -ForegroundColor Yellow
+        Write-Host ""
+    }
+    else {
+        $FileOwners[$RelativePath] = $Owner
+    }
+}
+
+function Register-ExistingPackFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceDirectory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Owner
+    )
+
+    if (-not (Test-Path $SourceDirectory -PathType Container)) {
+        return
+    }
+
+    $Files = @(
+        Get-ChildItem `
+            -LiteralPath $SourceDirectory `
+            -File `
+            -Recurse `
+            -Force
+    )
+
+    foreach ($File in $Files) {
+
+        $Relative = $File.FullName.Substring(
+            $SourceDirectory.Length
+        ).TrimStart("\", "/")
+
+        $Target = Join-Path $Pack $Relative
+
+        Register-FileOwner `
+            -FilePath $Target `
+            -Owner $Owner
+    }
+}
 
 # ============================================================
 # CHECK COMPONENTS
@@ -54,7 +164,11 @@ if (-not (Test-Path $ComponentsFile -PathType Leaf)) {
 }
 
 try {
-    $ConfigText = Get-Content $ComponentsFile -Raw -ErrorAction Stop
+
+    $ConfigText = Get-Content `
+        $ComponentsFile `
+        -Raw `
+        -ErrorAction Stop
 
     if ([string]::IsNullOrWhiteSpace($ConfigText)) {
         throw "components.json is empty."
@@ -85,10 +199,13 @@ $Headers = @{
 }
 
 if (-not [string]::IsNullOrWhiteSpace($GitHubToken)) {
+
     $Headers["Authorization"] = "Bearer $GitHubToken"
+
     Write-Host "GitHub API token: configured"
 }
 else {
+
     Write-Host "GitHub API token: NOT configured"
 }
 
@@ -111,6 +228,7 @@ function Get-LatestRelease {
     for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
 
         try {
+
             return Invoke-RestMethod `
                 -Uri $Url `
                 -Headers $Headers `
@@ -122,7 +240,9 @@ function Get-LatestRelease {
             Write-Host "Release request failed (attempt $Attempt of 3)."
 
             if ($Attempt -eq 3) {
-                throw "Could not retrieve latest release for '$Repo'. $($_.Exception.Message)"
+
+                throw `
+                    "Could not retrieve latest release for '$Repo'. $($_.Exception.Message)"
             }
 
             Start-Sleep -Seconds (5 * $Attempt)
@@ -224,7 +344,9 @@ function Install-File {
         [string]$Destination
     )
 
-    $DestinationFolder = Split-Path $Destination -Parent
+    $DestinationFolder = Split-Path `
+        $Destination `
+        -Parent
 
     if (-not [string]::IsNullOrWhiteSpace($DestinationFolder)) {
 
@@ -232,6 +354,17 @@ function Install-File {
             -ItemType Directory `
             -Path $DestinationFolder `
             -Force | Out-Null
+    }
+
+    # --------------------------------------------------------
+    # DUPLICATE DETECTION
+    # --------------------------------------------------------
+
+    if (Test-Path $Destination -PathType Leaf) {
+
+        Register-FileOwner `
+            -FilePath $Destination `
+            -Owner $CurrentComponent
     }
 
     Copy-Item `
@@ -266,11 +399,17 @@ function Merge-DirectoryContents {
         -Path $Destination `
         -Force | Out-Null
 
-    $Items = @(Get-ChildItem -LiteralPath $Source -Force)
+    $Items = @(
+        Get-ChildItem `
+            -LiteralPath $Source `
+            -Force
+    )
 
     foreach ($Item in $Items) {
 
-        $Target = Join-Path $Destination $Item.Name
+        $Target = Join-Path `
+            $Destination `
+            $Item.Name
 
         if ($Item.PSIsContainer) {
 
@@ -287,6 +426,21 @@ function Merge-DirectoryContents {
                 -Destination $Target
         }
         else {
+
+            if (Test-Path $Target -PathType Leaf) {
+
+                Register-FileOwner `
+                    -FilePath $Target `
+                    -Owner $CurrentComponent
+            }
+            else {
+
+                $RelativePath = Get-RelativePackPath $Target
+
+                if (-not $FileOwners.ContainsKey($RelativePath)) {
+                    $FileOwners[$RelativePath] = $CurrentComponent
+                }
+            }
 
             Copy-Item `
                 -LiteralPath $Item.FullName `
@@ -310,10 +464,16 @@ function Install-HatsBase {
         [string]$Destination
     )
 
-    $ExtractPath = Join-Path $Work "HATS-Base-Extract"
+    $ExtractPath = Join-Path `
+        $Work `
+        "HATS-Base-Extract"
 
     if (Test-Path $ExtractPath) {
-        Remove-Item $ExtractPath -Recurse -Force
+
+        Remove-Item `
+            $ExtractPath `
+            -Recurse `
+            -Force
     }
 
     New-Item `
@@ -357,7 +517,7 @@ function Install-HatsBase {
     }
 
     # --------------------------------------------------------
-    # CHECK IF ARCHIVE ROOT IS ALREADY SD ROOT
+    # CHECK IF ROOT IS ALREADY SD ROOT
     # --------------------------------------------------------
 
     $RootEntries = @(
@@ -398,7 +558,8 @@ function Install-HatsBase {
         return
     }
 
-    throw "Could not locate the HATS SD contents or SdOut directory."
+    throw `
+        "Could not locate the HATS SD contents or SdOut directory."
 }
 
 # ============================================================
@@ -412,7 +573,9 @@ function Normalize-Bootloader {
     Write-Host "Normalizing bootloader structure"
     Write-Host "========================================"
 
-    $Bootloader = Join-Path $Pack "bootloader"
+    $Bootloader = Join-Path `
+        $Pack `
+        "bootloader"
 
     if (-not (Test-Path $Bootloader -PathType Container)) {
 
@@ -422,7 +585,9 @@ function Normalize-Bootloader {
 
     while ($true) {
 
-        $NestedBootloader = Join-Path $Bootloader "bootloader"
+        $NestedBootloader = Join-Path `
+            $Bootloader `
+            "bootloader"
 
         if (-not (Test-Path $NestedBootloader -PathType Container)) {
             break
@@ -431,11 +596,17 @@ function Normalize-Bootloader {
         Write-Host "Found nested bootloader:"
         Write-Host "  $NestedBootloader"
 
-        $Items = @(Get-ChildItem -LiteralPath $NestedBootloader -Force)
+        $Items = @(
+            Get-ChildItem `
+                -LiteralPath $NestedBootloader `
+                -Force
+        )
 
         foreach ($Item in $Items) {
 
-            $Target = Join-Path $Bootloader $Item.Name
+            $Target = Join-Path `
+                $Bootloader `
+                $Item.Name
 
             if ($Item.PSIsContainer) {
 
@@ -460,6 +631,13 @@ function Normalize-Bootloader {
                 }
             }
             else {
+
+                if (Test-Path $Target -PathType Leaf) {
+
+                    Register-FileOwner `
+                        -FilePath $Target `
+                        -Owner $CurrentComponent
+                }
 
                 Copy-Item `
                     -LiteralPath $Item.FullName `
@@ -532,8 +710,13 @@ function Install-CustomHekateResources {
     Write-Host "Installing custom Hekate resources"
     Write-Host "========================================"
 
-    $Source = Join-Path $Root "assets\bootloader\res"
-    $Destination = Join-Path $Pack "bootloader\res"
+    $Source = Join-Path `
+        $Root `
+        "assets\bootloader\res"
+
+    $Destination = Join-Path `
+        $Pack `
+        "bootloader\res"
 
     if (-not (Test-Path $Source -PathType Container)) {
         throw "Custom Hekate resource directory not found: $Source"
@@ -545,7 +728,7 @@ function Install-CustomHekateResources {
         -Force | Out-Null
 
     # --------------------------------------------------------
-    # ONLY THESE TWO CUSTOM ICONS
+    # CUSTOM ICONS
     # --------------------------------------------------------
 
     $RequiredIcons = @(
@@ -555,8 +738,13 @@ function Install-CustomHekateResources {
 
     foreach ($IconName in $RequiredIcons) {
 
-        $IconSource = Join-Path $Source $IconName
-        $IconDestination = Join-Path $Destination $IconName
+        $IconSource = Join-Path `
+            $Source `
+            $IconName
+
+        $IconDestination = Join-Path `
+            $Destination `
+            $IconName
 
         if (-not (Test-Path $IconSource -PathType Leaf)) {
             throw "Required custom Hekate icon not found: $IconSource"
@@ -566,6 +754,18 @@ function Install-CustomHekateResources {
 
         if ($IconFile.Length -le 0) {
             throw "Custom Hekate icon is empty: $IconSource"
+        }
+
+        if (Test-Path $IconDestination -PathType Leaf) {
+
+            Register-FileOwner `
+                -FilePath $IconDestination `
+                -Owner "Custom Hekate Resources"
+        }
+        else {
+
+            $Relative = Get-RelativePackPath $IconDestination
+            $FileOwners[$Relative] = "Custom Hekate Resources"
         }
 
         Copy-Item `
@@ -581,8 +781,13 @@ function Install-CustomHekateResources {
     # BACKGROUND
     # --------------------------------------------------------
 
-    $BackgroundSource = Join-Path $Source "background.bmp"
-    $BackgroundDestination = Join-Path $Destination "background.bmp"
+    $BackgroundSource = Join-Path `
+        $Source `
+        "background.bmp"
+
+    $BackgroundDestination = Join-Path `
+        $Destination `
+        "background.bmp"
 
     if (Test-Path $BackgroundSource -PathType Leaf) {
 
@@ -590,6 +795,18 @@ function Install-CustomHekateResources {
 
         if ($BackgroundFile.Length -le 0) {
             throw "Custom Hekate background is empty."
+        }
+
+        if (Test-Path $BackgroundDestination -PathType Leaf) {
+
+            Register-FileOwner `
+                -FilePath $BackgroundDestination `
+                -Owner "Custom Hekate Resources"
+        }
+        else {
+
+            $Relative = Get-RelativePackPath $BackgroundDestination
+            $FileOwners[$Relative] = "Custom Hekate Resources"
         }
 
         Copy-Item `
@@ -618,16 +835,26 @@ function Install-CleanHekateConfig {
     Write-Host "Installing clean Hekate configuration"
     Write-Host "========================================"
 
-    $Bootloader = Join-Path $Pack "bootloader"
-    $ConfigPath = Join-Path $Bootloader "hekate_ipl.ini"
+    $Bootloader = Join-Path `
+        $Pack `
+        "bootloader"
+
+    $ConfigPath = Join-Path `
+        $Bootloader `
+        "hekate_ipl.ini"
 
     New-Item `
         -ItemType Directory `
         -Path $Bootloader `
         -Force | Out-Null
 
-    # Remove additional ini files.
-    $IniDirectory = Join-Path $Bootloader "ini"
+    # --------------------------------------------------------
+    # REMOVE EXTRA INI DIRECTORY
+    # --------------------------------------------------------
+
+    $IniDirectory = Join-Path `
+        $Bootloader `
+        "ini"
 
     if (Test-Path $IniDirectory -PathType Container) {
 
@@ -641,7 +868,7 @@ function Install-CleanHekateConfig {
     }
 
     # --------------------------------------------------------
-    # ONLY TWO MAIN HEKATE ENTRIES
+    # CLEAN HEKATE CONFIG
     # --------------------------------------------------------
 
     $HekateConfig = @'
@@ -668,6 +895,18 @@ emummcforce=1
 icon=bootloader/res/emummc.bmp
 '@
 
+    if (Test-Path $ConfigPath -PathType Leaf) {
+
+        Register-FileOwner `
+            -FilePath $ConfigPath `
+            -Owner "Custom Hekate Configuration"
+    }
+    else {
+
+        $Relative = Get-RelativePackPath $ConfigPath
+        $FileOwners[$Relative] = "Custom Hekate Configuration"
+    }
+
     Set-Content `
         -LiteralPath $ConfigPath `
         -Value $HekateConfig `
@@ -681,7 +920,7 @@ icon=bootloader/res/emummc.bmp
 }
 
 # ============================================================
-# REMOVE DUPLICATE APPLICATION NRO FILES
+# REMOVE DUPLICATE APPLICATION NROS
 # ============================================================
 
 function Remove-DuplicateApplicationNros {
@@ -691,7 +930,9 @@ function Remove-DuplicateApplicationNros {
     Write-Host "Cleaning duplicate application NRO files"
     Write-Host "========================================"
 
-    $SwitchPath = Join-Path $Pack "switch"
+    $SwitchPath = Join-Path `
+        $Pack `
+        "switch"
 
     if (-not (Test-Path $SwitchPath -PathType Container)) {
 
@@ -699,10 +940,10 @@ function Remove-DuplicateApplicationNros {
         return
     }
 
-    # These applications already have their own folders
-    # containing their application files.
-    #
-    # Remove the duplicate root-level NRO files only.
+    # These are known duplicate root-level files
+    # that commonly appear alongside their application
+    # folders in HATS-based packs.
+
     $DuplicateRootNros = @(
         "90DNSTester.nro",
         "Goldleaf.nro",
@@ -712,7 +953,9 @@ function Remove-DuplicateApplicationNros {
 
     foreach ($NroName in $DuplicateRootNros) {
 
-        $NroPath = Join-Path $SwitchPath $NroName
+        $NroPath = Join-Path `
+            $SwitchPath `
+            $NroName
 
         if (Test-Path $NroPath -PathType Leaf) {
 
@@ -735,7 +978,7 @@ function Remove-DuplicateApplicationNros {
 }
 
 # ============================================================
-# REMOVE DUPLICATE EDIZON OVERLAY
+# REMOVE DUPLICATE OVERLAYS
 # ============================================================
 
 function Remove-DuplicateOverlays {
@@ -745,7 +988,9 @@ function Remove-DuplicateOverlays {
     Write-Host "Cleaning duplicate overlays"
     Write-Host "========================================"
 
-    $OverlayPath = Join-Path $Pack "switch\.overlays"
+    $OverlayPath = Join-Path `
+        $Pack `
+        "switch\.overlays"
 
     if (-not (Test-Path $OverlayPath -PathType Container)) {
 
@@ -753,15 +998,15 @@ function Remove-DuplicateOverlays {
         return
     }
 
-    # Keep EdiZon.ovl.
-    # Remove the duplicate alternate filename.
     $DuplicateOverlays = @(
         "ovlEdiZon.ovl"
     )
 
     foreach ($OverlayName in $DuplicateOverlays) {
 
-        $OverlayFile = Join-Path $OverlayPath $OverlayName
+        $OverlayFile = Join-Path `
+            $OverlayPath `
+            $OverlayName
 
         if (Test-Path $OverlayFile -PathType Leaf) {
 
@@ -804,10 +1049,12 @@ function Remove-EmptyDirectories {
 
         foreach ($Directory in $Directories) {
 
-            $Items = @(Get-ChildItem `
-                -LiteralPath $Directory.FullName `
-                -Force `
-                -ErrorAction SilentlyContinue)
+            $Items = @(
+                Get-ChildItem `
+                    -LiteralPath $Directory.FullName `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+            )
 
             if ($Items.Count -eq 0) {
 
@@ -829,13 +1076,86 @@ function Remove-EmptyDirectories {
 
 function Verify-Bootloader {
 
-    $NestedBootloader = Join-Path $Pack "bootloader\bootloader"
+    $NestedBootloader = Join-Path `
+        $Pack `
+        "bootloader\bootloader"
 
     if (Test-Path $NestedBootloader -PathType Container) {
-        throw "Nested bootloader directory still exists: $NestedBootloader"
+
+        throw `
+            "Nested bootloader directory still exists: $NestedBootloader"
     }
 
     Write-Host "OK: No nested bootloader directory found."
+}
+
+# ============================================================
+# WRITE DUPLICATE REPORT
+# ============================================================
+
+function Write-DuplicateReport {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "DUPLICATE FILE REPORT"
+    Write-Host "========================================"
+
+    if ($DuplicateFiles.Count -eq 0) {
+
+        Write-Host "No duplicate files detected."
+        Write-Host ""
+
+        @"
+SkipperBNS HATS Pack
+Duplicate File Report
+=====================
+
+No duplicate files were detected during the build.
+"@ | Set-Content `
+            -LiteralPath $DuplicateReport `
+            -Encoding UTF8
+
+        return
+    }
+
+    Write-Host ""
+    Write-Host "Duplicate files detected: $($DuplicateFiles.Count)"
+    Write-Host ""
+
+    $ReportLines = New-Object System.Collections.Generic.List[string]
+
+    $ReportLines.Add("SkipperBNS HATS Pack")
+    $ReportLines.Add("Duplicate File Report")
+    $ReportLines.Add("=====================")
+    $ReportLines.Add("")
+    $ReportLines.Add("Total duplicate files: $($DuplicateFiles.Count)")
+    $ReportLines.Add("")
+
+    $Number = 0
+
+    foreach ($Duplicate in $DuplicateFiles) {
+
+        $Number++
+
+        Write-Host "[$Number] $($Duplicate.Path)" `
+            -ForegroundColor Yellow
+
+        Write-Host "    First : $($Duplicate.FirstComponent)"
+        Write-Host "    Second: $($Duplicate.SecondComponent)"
+        Write-Host ""
+
+        $ReportLines.Add("[$Number] $($Duplicate.Path)")
+        $ReportLines.Add("    First : $($Duplicate.FirstComponent)")
+        $ReportLines.Add("    Second: $($Duplicate.SecondComponent)")
+        $ReportLines.Add("")
+    }
+
+    $ReportLines | Set-Content `
+        -LiteralPath $DuplicateReport `
+        -Encoding UTF8
+
+    Write-Host "Duplicate report saved:"
+    Write-Host "  $DuplicateReport"
 }
 
 # ============================================================
@@ -849,14 +1169,16 @@ foreach ($Component in $Config.components) {
 
     $Index++
 
+    $CurrentComponent = [string]$Component.name
+
     Write-Host ""
     Write-Host "========================================"
     Write-Host "Component $Index of $Total"
-    Write-Host "$($Component.name)"
+    Write-Host "$CurrentComponent"
     Write-Host "========================================"
 
     if ([string]::IsNullOrWhiteSpace($Component.mode)) {
-        throw "Component '$($Component.name)' has no mode."
+        throw "Component '$CurrentComponent' has no mode."
     }
 
     Write-Host "Mode: $($Component.mode)"
@@ -868,15 +1190,20 @@ foreach ($Component in $Config.components) {
     if ($Component.mode -eq "local_root") {
 
         if ([string]::IsNullOrWhiteSpace($Component.source)) {
-            throw "Component '$($Component.name)' has no source."
+            throw "Component '$CurrentComponent' has no source."
         }
 
         if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-            throw "Component '$($Component.name)' has no destination."
+            throw "Component '$CurrentComponent' has no destination."
         }
 
-        $Source = Join-Path $Root $Component.source
-        $Destination = Join-Path $Pack $Component.destination
+        $Source = Join-Path `
+            $Root `
+            $Component.source
+
+        $Destination = Join-Path `
+            $Pack `
+            $Component.destination
 
         Write-Host "Local source:"
         Write-Host "  $Source"
@@ -899,16 +1226,17 @@ foreach ($Component in $Config.components) {
     if ($Component.mode -eq "hats_base") {
 
         if ([string]::IsNullOrWhiteSpace($Component.repo)) {
-            throw "Component '$($Component.name)' has no repository."
+            throw "Component '$CurrentComponent' has no repository."
         }
 
         if ([string]::IsNullOrWhiteSpace($Component.asset_regex)) {
-            throw "Component '$($Component.name)' has no asset_regex."
+            throw "Component '$CurrentComponent' has no asset_regex."
         }
 
         Write-Host "Repository: $($Component.repo)"
 
-        $Release = Get-LatestRelease $Component.repo
+        $Release = Get-LatestRelease `
+            $Component.repo
 
         if ($null -eq $Release) {
             throw "No release information returned for $($Component.repo)"
@@ -923,7 +1251,9 @@ foreach ($Component in $Config.components) {
         if ($null -eq $Asset) {
 
             Write-Host ""
-            Write-Host "ERROR: No matching HATS asset found." -ForegroundColor Red
+            Write-Host "ERROR: No matching HATS asset found." `
+                -ForegroundColor Red
+
             Write-Host "Required pattern: $($Component.asset_regex)"
             Write-Host ""
             Write-Host "Available assets:"
@@ -932,12 +1262,15 @@ foreach ($Component in $Config.components) {
                 Write-Host "  $($Available.name)"
             }
 
-            throw "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
+            throw `
+                "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
         }
 
         Write-Host "Asset: $($Asset.name)"
 
-        $DownloadPath = Join-Path $Work $Asset.name
+        $DownloadPath = Join-Path `
+            $Work `
+            $Asset.name
 
         Download-Asset `
             -Asset $Asset `
@@ -955,16 +1288,17 @@ foreach ($Component in $Config.components) {
     # ========================================================
 
     if ([string]::IsNullOrWhiteSpace($Component.repo)) {
-        throw "Component '$($Component.name)' has no repository."
+        throw "Component '$CurrentComponent' has no repository."
     }
 
     if ([string]::IsNullOrWhiteSpace($Component.asset_regex)) {
-        throw "Component '$($Component.name)' has no asset_regex."
+        throw "Component '$CurrentComponent' has no asset_regex."
     }
 
     Write-Host "Repository: $($Component.repo)"
 
-    $Release = Get-LatestRelease $Component.repo
+    $Release = Get-LatestRelease `
+        $Component.repo
 
     if ($null -eq $Release) {
         throw "No release information returned for $($Component.repo)"
@@ -979,7 +1313,9 @@ foreach ($Component in $Config.components) {
     if ($null -eq $Asset) {
 
         Write-Host ""
-        Write-Host "ERROR: No matching asset found." -ForegroundColor Red
+        Write-Host "ERROR: No matching asset found." `
+            -ForegroundColor Red
+
         Write-Host "Required pattern: $($Component.asset_regex)"
         Write-Host ""
         Write-Host "Available assets:"
@@ -988,13 +1324,18 @@ foreach ($Component in $Config.components) {
             Write-Host "  $($Available.name)"
         }
 
-        throw "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
+        throw `
+            "Could not find an asset matching '$($Component.asset_regex)' for $($Component.repo)"
     }
 
     Write-Host "Asset: $($Asset.name)"
 
-    $SafeAssetName = $Asset.name -replace '[\\/:*?"<>|]', '_'
-    $DownloadPath = Join-Path $Work "$Index-$SafeAssetName"
+    $SafeAssetName = $Asset.name `
+        -replace '[\\/:*?"<>|]', '_'
+
+    $DownloadPath = Join-Path `
+        $Work `
+        "$Index-$SafeAssetName"
 
     Download-Asset `
         -Asset $Asset `
@@ -1008,10 +1349,16 @@ foreach ($Component in $Config.components) {
 
         "zip" {
 
-            $ExtractPath = Join-Path $Work "component-$Index"
+            $ExtractPath = Join-Path `
+                $Work `
+                "component-$Index"
 
             if (Test-Path $ExtractPath) {
-                Remove-Item $ExtractPath -Recurse -Force
+
+                Remove-Item `
+                    $ExtractPath `
+                    -Recurse `
+                    -Force
             }
 
             New-Item `
@@ -1037,7 +1384,7 @@ foreach ($Component in $Config.components) {
         "nro" {
 
             if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-                throw "Component '$($Component.name)' has no destination."
+                throw "Component '$CurrentComponent' has no destination."
             }
 
             $Destination = Join-Path `
@@ -1058,7 +1405,7 @@ foreach ($Component in $Config.components) {
         "ovl" {
 
             if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-                throw "Component '$($Component.name)' has no destination."
+                throw "Component '$CurrentComponent' has no destination."
             }
 
             $OverlayDestination = $Component.destination `
@@ -1082,7 +1429,7 @@ foreach ($Component in $Config.components) {
         "file" {
 
             if ([string]::IsNullOrWhiteSpace($Component.destination)) {
-                throw "Component '$($Component.name)' has no destination."
+                throw "Component '$CurrentComponent' has no destination."
             }
 
             $Destination = Join-Path `
@@ -1097,7 +1444,9 @@ foreach ($Component in $Config.components) {
         }
 
         default {
-            throw "Unknown component mode '$($Component.mode)' for $($Component.name)"
+
+            throw `
+                "Unknown component mode '$($Component.mode)' for $CurrentComponent"
         }
     }
 }
@@ -1110,6 +1459,8 @@ Write-Host ""
 Write-Host "========================================"
 Write-Host "FINAL PACK CLEANUP"
 Write-Host "========================================"
+
+$CurrentComponent = "Final Cleanup"
 
 Normalize-Bootloader
 Remove-SdOutDirectories
@@ -1131,6 +1482,12 @@ Remove-DuplicateOverlays
 Remove-EmptyDirectories
 
 # ============================================================
+# WRITE DUPLICATE REPORT
+# ============================================================
+
+Write-DuplicateReport
+
+# ============================================================
 # VERIFY CUSTOM HEKATE FILES
 # ============================================================
 
@@ -1139,7 +1496,9 @@ Write-Host "========================================"
 Write-Host "Verifying custom Hekate resources"
 Write-Host "========================================"
 
-$BootloaderResPath = Join-Path $Pack "bootloader\res"
+$BootloaderResPath = Join-Path `
+    $Pack `
+    "bootloader\res"
 
 $RequiredBootloaderImages = @(
     "emummc.bmp",
@@ -1148,10 +1507,13 @@ $RequiredBootloaderImages = @(
 
 foreach ($ImageName in $RequiredBootloaderImages) {
 
-    $ImagePath = Join-Path $BootloaderResPath $ImageName
+    $ImagePath = Join-Path `
+        $BootloaderResPath `
+        $ImageName
 
     if (-not (Test-Path $ImagePath -PathType Leaf)) {
-        throw "Required Hekate image missing: bootloader\res\$ImageName"
+        throw `
+            "Required Hekate image missing: bootloader\res\$ImageName"
     }
 
     $ImageFile = Get-Item $ImagePath
@@ -1168,7 +1530,9 @@ foreach ($ImageName in $RequiredBootloaderImages) {
 # VERIFY BACKGROUND
 # ============================================================
 
-$BackgroundPath = Join-Path $Pack "bootloader\res\background.bmp"
+$BackgroundPath = Join-Path `
+    $Pack `
+    "bootloader\res\background.bmp"
 
 Write-Host ""
 Write-Host "========================================"
@@ -1196,7 +1560,9 @@ else {
 # VERIFY HEKATE CONFIGURATION
 # ============================================================
 
-$HekateConfigPath = Join-Path $Pack "bootloader\hekate_ipl.ini"
+$HekateConfigPath = Join-Path `
+    $Pack `
+    "bootloader\hekate_ipl.ini"
 
 Write-Host ""
 Write-Host "========================================"
@@ -1215,7 +1581,6 @@ if ($HekateConfigFile.Length -le 0) {
 
 Write-Host "OK: bootloader\hekate_ipl.ini"
 
-# Make sure our two icons are referenced.
 $HekateConfigText = Get-Content `
     -LiteralPath $HekateConfigPath `
     -Raw
@@ -1266,7 +1631,8 @@ foreach ($Entry in $MainEntries) {
 }
 
 if ($MainEntries.Count -ne 2) {
-    throw "Hekate configuration contains $($MainEntries.Count) main entries. Expected exactly 2."
+    throw `
+        "Hekate configuration contains $($MainEntries.Count) main entries. Expected exactly 2."
 }
 
 # ============================================================
@@ -1285,16 +1651,20 @@ $RequiredLocalFiles = @(
 
 foreach ($RelativePath in $RequiredLocalFiles) {
 
-    $RequiredPath = Join-Path $Pack $RelativePath
+    $RequiredPath = Join-Path `
+        $Pack `
+        $RelativePath
 
     if (-not (Test-Path $RequiredPath -PathType Leaf)) {
-        throw "Required file missing from final pack: $RelativePath"
+        throw `
+            "Required file missing from final pack: $RelativePath"
     }
 
     $RequiredFile = Get-Item $RequiredPath
 
     if ($RequiredFile.Length -le 0) {
-        throw "Required file is empty: $RelativePath"
+        throw `
+            "Required file is empty: $RelativePath"
     }
 
     Write-Host "OK: $RelativePath"
@@ -1318,22 +1688,30 @@ $DuplicateCheckFiles = @(
 
 foreach ($RelativePath in $DuplicateCheckFiles) {
 
-    $DuplicatePath = Join-Path $Pack $RelativePath
+    $DuplicatePath = Join-Path `
+        $Pack `
+        $RelativePath
 
     if (Test-Path $DuplicatePath -PathType Leaf) {
 
-        throw "Duplicate application NRO still exists: $RelativePath"
+        throw `
+            "Duplicate application NRO still exists: $RelativePath"
     }
 
     Write-Host "OK: removed $RelativePath"
 }
 
 # ============================================================
-# VERIFY EDIZON DUPLICATE IS GONE
+# VERIFY EDIZON DUPLICATE
 # ============================================================
 
-$DuplicateEdiZon = Join-Path $Pack "switch\.overlays\ovlEdiZon.ovl"
-$KeptEdiZon = Join-Path $Pack "switch\.overlays\EdiZon.ovl"
+$DuplicateEdiZon = Join-Path `
+    $Pack `
+    "switch\.overlays\ovlEdiZon.ovl"
+
+$KeptEdiZon = Join-Path `
+    $Pack `
+    "switch\.overlays\EdiZon.ovl"
 
 Write-Host ""
 Write-Host "========================================"
@@ -1354,7 +1732,7 @@ else {
 }
 
 # ============================================================
-# VERIFY IMPORTANT HATS FILES
+# IMPORTANT HATS FILES
 # ============================================================
 
 Write-Host ""
@@ -1372,7 +1750,9 @@ $ImportantFiles = @(
 
 foreach ($RelativePath in $ImportantFiles) {
 
-    $CheckPath = Join-Path $Pack $RelativePath
+    $CheckPath = Join-Path `
+        $Pack `
+        $RelativePath
 
     if (Test-Path $CheckPath -PathType Leaf) {
         Write-Host "OK: $RelativePath"
@@ -1391,7 +1771,9 @@ Write-Host "========================================"
 Write-Host "Final Hekate structure"
 Write-Host "========================================"
 
-$FinalBootloader = Join-Path $Pack "bootloader"
+$FinalBootloader = Join-Path `
+    $Pack `
+    "bootloader"
 
 if (Test-Path $FinalBootloader -PathType Container) {
 
@@ -1432,6 +1814,30 @@ if ($PackFiles.Count -eq 0) {
 }
 
 Write-Host "Files in pack: $($PackFiles.Count)"
+
+# ============================================================
+# DUPLICATE SUMMARY
+# ============================================================
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "DUPLICATE SUMMARY"
+Write-Host "========================================"
+
+if ($DuplicateFiles.Count -eq 0) {
+
+    Write-Host "SUCCESS: No duplicate files detected." `
+        -ForegroundColor Green
+}
+else {
+
+    Write-Host "WARNING: $($DuplicateFiles.Count) duplicate file(s) detected." `
+        -ForegroundColor Yellow
+
+    Write-Host ""
+    Write-Host "The later component was allowed to overwrite the earlier file."
+    Write-Host "See DUPLICATES.txt for the complete list."
+}
 
 # ============================================================
 # CREATE FINAL ZIP
@@ -1499,6 +1905,10 @@ Write-Host ""
 Write-Host "Duplicate overlay cleanup:"
 Write-Host "  ovlEdiZon.ovl removed"
 Write-Host "  EdiZon.ovl kept"
+Write-Host ""
+
+Write-Host "Duplicate report:"
+Write-Host "  $DuplicateReport"
 Write-Host ""
 
 Write-Host "Build completed successfully."
