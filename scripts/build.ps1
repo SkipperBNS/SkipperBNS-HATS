@@ -881,6 +881,256 @@ function Install-CustomHekateResources {
         Write-Host "Keeping the HATS/Hekate background."
     }
 }
+# ============================================================
+# INSTALL CUSTOM ATMOSPHERE SPLASH
+# ============================================================
+
+function Install-CustomAtmosphereSplash {
+
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Installing custom Atmosphere splash"
+    Write-Host "========================================"
+
+    $SplashSource = Join-Path `
+        $Root `
+        "assets\emummc_splash.png"
+
+    $Package3 = Join-Path `
+        $Pack `
+        "atmosphere\package3"
+
+    $PythonScript = Join-Path `
+        $Work `
+        "insert_splash_screen.py"
+
+    # --------------------------------------------------------
+    # CHECK SPLASH
+    # --------------------------------------------------------
+
+    if (-not (Test-Path $SplashSource -PathType Leaf)) {
+        throw "Custom Atmosphere splash not found: $SplashSource"
+    }
+
+    $SplashFile = Get-Item $SplashSource
+
+    if ($SplashFile.Length -le 0) {
+        throw "Custom Atmosphere splash is empty: $SplashSource"
+    }
+
+    Write-Host "Splash:"
+    Write-Host "  $SplashSource"
+
+    # --------------------------------------------------------
+    # CHECK PACKAGE3
+    # --------------------------------------------------------
+
+    if (-not (Test-Path $Package3 -PathType Leaf)) {
+        throw "Atmosphere package3 not found: $Package3"
+    }
+
+    $Package3File = Get-Item $Package3
+
+    if ($Package3File.Length -ne 0x800000) {
+        throw "Unexpected package3 size: $($Package3File.Length) bytes. Expected 8388608 bytes."
+    }
+
+    Write-Host "package3:"
+    Write-Host "  $Package3"
+    Write-Host "  Size: $($Package3File.Length) bytes"
+
+    # --------------------------------------------------------
+    # FIND PYTHON
+    # --------------------------------------------------------
+
+    $PythonCommand = $null
+
+    $PythonCandidates = @(
+        "python",
+        "python3",
+        "py"
+    )
+
+    foreach ($Candidate in $PythonCandidates) {
+
+        try {
+
+            $Command = Get-Command $Candidate `
+                -ErrorAction Stop
+
+            if ($null -ne $Command) {
+
+                $PythonCommand = $Candidate
+
+                Write-Host "Python:"
+                Write-Host "  $PythonCommand"
+
+                break
+            }
+
+        }
+        catch {
+            # Try next Python command.
+        }
+    }
+
+    if ($null -eq $PythonCommand) {
+        throw "Python was not found. GitHub Actions must provide Python."
+    }
+
+    # --------------------------------------------------------
+    # INSTALL / VERIFY PILLOW
+    # --------------------------------------------------------
+
+    Write-Host "Checking Pillow..."
+
+    & $PythonCommand -m pip show Pillow *> $null
+
+    if ($LASTEXITCODE -ne 0) {
+
+        Write-Host "Pillow is not installed."
+        Write-Host "Installing Pillow..."
+
+        & $PythonCommand -m pip install `
+            --disable-pip-version-check `
+            --no-input `
+            Pillow
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install Python Pillow."
+        }
+    }
+    else {
+
+        Write-Host "Pillow is already installed."
+    }
+
+    # --------------------------------------------------------
+    # CREATE SPLASH INSERTION SCRIPT
+    #
+    # This follows Atmosphere's official package3 splash
+    # insertion format.
+    # --------------------------------------------------------
+
+    $PythonCode = @'
+from PIL import Image
+from struct import pack as pk
+import sys
+
+SPLASH_SCREEN_WIDTH = 1280
+SPLASH_SCREEN_HEIGHT = 720
+SPLASH_SCREEN_STRIDE = 768
+
+
+def convert_image(image_fn):
+
+    splash = Image.open(image_fn, "r")
+
+    w, h = splash.size
+
+    if w == 1280 and h == 720:
+        splash = splash.transpose(Image.Transpose.ROTATE_90)
+
+    w, h = splash.size
+
+    assert w == 720
+    assert h == 1280
+
+    splash = splash.convert("RGBA")
+
+    splash_bin = bytearray()
+
+    for row in range(SPLASH_SCREEN_WIDTH):
+
+        for col in range(SPLASH_SCREEN_HEIGHT):
+
+            r, g, b, a = splash.getpixel((col, row))
+
+            splash_bin += pk("<BBBB", b, g, r, a)
+
+        splash_bin += b"\x00" * (
+            (SPLASH_SCREEN_STRIDE - SPLASH_SCREEN_HEIGHT) * 4
+        )
+
+    return splash_bin
+
+
+def main():
+
+    if len(sys.argv) != 3:
+
+        print(
+            "Usage: insert_splash_screen.py "
+            "<image> <package3>"
+        )
+
+        return 1
+
+    image_path = sys.argv[1]
+    package3_path = sys.argv[2]
+
+    with open(package3_path, "rb") as f:
+        package3 = f.read()
+
+    assert package3[:4] == b"PK31"
+    assert len(package3) == 0x800000
+
+    splash_bin = convert_image(image_path)
+
+    assert len(splash_bin) == 0x3C0000
+
+    with open(package3_path, "wb") as f:
+
+        f.write(package3[:0x400000])
+        f.write(splash_bin)
+        f.write(package3[0x7C0000:])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'@
+
+    New-Item `
+        -ItemType Directory `
+        -Path $Work `
+        -Force | Out-Null
+
+    Set-Content `
+        -LiteralPath $PythonScript `
+        -Value $PythonCode `
+        -Encoding UTF8 `
+        -Force
+
+    # --------------------------------------------------------
+    # INSERT SPLASH
+    # --------------------------------------------------------
+
+    Write-Host "Inserting custom splash into Atmosphere package3..."
+
+    & $PythonCommand `
+        $PythonScript `
+        $SplashSource `
+        $Package3
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to insert custom Atmosphere splash into package3."
+    }
+
+    # --------------------------------------------------------
+    # VERIFY
+    # --------------------------------------------------------
+
+    $Package3After = Get-Item $Package3
+
+    if ($Package3After.Length -ne 0x800000) {
+        throw "package3 size changed unexpectedly after splash insertion."
+    }
+
+    Write-Host ""
+    Write-Host "OK: Custom Atmosphere splash installed."
+    Write-Host "    $SplashSource"
+    Write-Host "    -> atmosphere\package3"
+}
 
 # ============================================================
 # INSTALL CLEAN HEKATE CONFIG
@@ -1553,6 +1803,12 @@ Verify-Bootloader
 
 Install-CustomHekateResources
 Install-CleanHekateConfig
+
+# ============================================================
+# CUSTOM ATMOSPHERE SPLASH
+# ============================================================
+
+Install-CustomAtmosphereSplash
 
 # ============================================================
 # DUPLICATE CLEANUP
