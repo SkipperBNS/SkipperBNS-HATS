@@ -904,15 +904,18 @@ function Install-CustomAtmosphereSplash {
         $Work `
         "insert_splash_screen.py"
 
+    $OfficialSplashScriptUrl = `
+        "https://raw.githubusercontent.com/Atmosphere-NX/Atmosphere/master/utilities/insert_splash_screen.py"
+
     # --------------------------------------------------------
     # CHECK SPLASH
     # --------------------------------------------------------
 
-    if (-not (Test-Path $SplashSource -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $SplashSource -PathType Leaf)) {
         throw "Custom Atmosphere splash not found: $SplashSource"
     }
 
-    $SplashFile = Get-Item $SplashSource
+    $SplashFile = Get-Item -LiteralPath $SplashSource
 
     if ($SplashFile.Length -le 0) {
         throw "Custom Atmosphere splash is empty: $SplashSource"
@@ -920,24 +923,25 @@ function Install-CustomAtmosphereSplash {
 
     Write-Host "Splash:"
     Write-Host "  $SplashSource"
+    Write-Host "  Size: $($SplashFile.Length) bytes"
 
     # --------------------------------------------------------
     # CHECK PACKAGE3
     # --------------------------------------------------------
 
-    if (-not (Test-Path $Package3 -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $Package3 -PathType Leaf)) {
         throw "Atmosphere package3 not found: $Package3"
     }
 
-    $Package3File = Get-Item $Package3
-
-    if ($Package3File.Length -ne 0x800000) {
-        throw "Unexpected package3 size: $($Package3File.Length) bytes. Expected 8388608 bytes."
-    }
+    $Package3File = Get-Item -LiteralPath $Package3
 
     Write-Host "package3:"
     Write-Host "  $Package3"
     Write-Host "  Size: $($Package3File.Length) bytes"
+
+    if ($Package3File.Length -ne 0x800000) {
+        throw "Unexpected package3 size: $($Package3File.Length) bytes. Atmosphere's splash utility requires 8388608 bytes."
+    }
 
     # --------------------------------------------------------
     # FIND PYTHON
@@ -945,26 +949,17 @@ function Install-CustomAtmosphereSplash {
 
     $PythonCommand = $null
 
-    $PythonCandidates = @(
-        "python",
-        "python3",
-        "py"
-    )
-
-    foreach ($Candidate in $PythonCandidates) {
+    foreach ($Candidate in @("py", "python", "python3")) {
 
         try {
 
-            $Command = Get-Command $Candidate `
+            $Command = Get-Command `
+                $Candidate `
                 -ErrorAction Stop
 
             if ($null -ne $Command) {
 
                 $PythonCommand = $Candidate
-
-                Write-Host "Python:"
-                Write-Host "  $PythonCommand"
-
                 break
             }
 
@@ -975,136 +970,100 @@ function Install-CustomAtmosphereSplash {
     }
 
     if ($null -eq $PythonCommand) {
-        throw "Python was not found. GitHub Actions must provide Python."
+        throw "Python was not found on the GitHub Actions runner."
     }
+
+    Write-Host "Python:"
+    Write-Host "  $PythonCommand"
 
     # --------------------------------------------------------
     # INSTALL / VERIFY PILLOW
     # --------------------------------------------------------
 
-    Write-Host "Checking Pillow..."
+    Write-Host ""
+    Write-Host "Installing/verifying Python Pillow..."
 
-    & $PythonCommand -m pip show Pillow *> $null
+    & $PythonCommand -m pip install `
+        --disable-pip-version-check `
+        --no-input `
+        --upgrade `
+        Pillow
 
     if ($LASTEXITCODE -ne 0) {
-
-        Write-Host "Pillow is not installed."
-        Write-Host "Installing Pillow..."
-
-        & $PythonCommand -m pip install `
-            --disable-pip-version-check `
-            --no-input `
-            Pillow
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install Python Pillow."
-        }
-    }
-    else {
-
-        Write-Host "Pillow is already installed."
+        throw "Failed to install Python Pillow."
     }
 
     # --------------------------------------------------------
-    # CREATE SPLASH INSERTION SCRIPT
-    #
-    # This follows Atmosphere's official package3 splash
-    # insertion format.
+    # VERIFY IMAGE DIMENSIONS
     # --------------------------------------------------------
 
-    $PythonCode = @'
+    $ImageCheckScript = Join-Path `
+        $Work `
+        "check_splash.py"
+
+    $ImageCheckCode = @'
 from PIL import Image
-from struct import pack as pk
 import sys
 
-SPLASH_SCREEN_WIDTH = 1280
-SPLASH_SCREEN_HEIGHT = 720
-SPLASH_SCREEN_STRIDE = 768
+image_path = sys.argv[1]
 
+with Image.open(image_path) as image:
+    print("Splash format:", image.format)
+    print("Splash mode:", image.mode)
+    print("Splash size:", image.size)
 
-def convert_image(image_fn):
-
-    splash = Image.open(image_fn, "r")
-
-    w, h = splash.size
-
-    if w == 1280 and h == 720:
-        splash = splash.transpose(Image.Transpose.ROTATE_90)
-
-    w, h = splash.size
-
-    assert w == 720
-    assert h == 1280
-
-    splash = splash.convert("RGBA")
-
-    splash_bin = bytearray()
-
-    for row in range(SPLASH_SCREEN_WIDTH):
-
-        for col in range(SPLASH_SCREEN_HEIGHT):
-
-            r, g, b, a = splash.getpixel((col, row))
-
-            splash_bin += pk("<BBBB", b, g, r, a)
-
-        splash_bin += b"\x00" * (
-            (SPLASH_SCREEN_STRIDE - SPLASH_SCREEN_HEIGHT) * 4
+    if image.size != (1280, 720):
+        raise SystemExit(
+            "ERROR: Atmosphere splash must be exactly 1280x720."
         )
-
-    return splash_bin
-
-
-def main():
-
-    if len(sys.argv) != 3:
-
-        print(
-            "Usage: insert_splash_screen.py "
-            "<image> <package3>"
-        )
-
-        return 1
-
-    image_path = sys.argv[1]
-    package3_path = sys.argv[2]
-
-    with open(package3_path, "rb") as f:
-        package3 = f.read()
-
-    assert package3[:4] == b"PK31"
-    assert len(package3) == 0x800000
-
-    splash_bin = convert_image(image_path)
-
-    assert len(splash_bin) == 0x3C0000
-
-    with open(package3_path, "wb") as f:
-
-        f.write(package3[:0x400000])
-        f.write(splash_bin)
-        f.write(package3[0x7C0000:])
-
-
-if __name__ == "__main__":
-    sys.exit(main())
 '@
 
-    New-Item `
-        -ItemType Directory `
-        -Path $Work `
-        -Force | Out-Null
-
     Set-Content `
-        -LiteralPath $PythonScript `
-        -Value $PythonCode `
+        -LiteralPath $ImageCheckScript `
+        -Value $ImageCheckCode `
         -Encoding UTF8 `
         -Force
+
+    & $PythonCommand `
+        $ImageCheckScript `
+        $SplashSource
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Custom Atmosphere splash failed the 1280x720 image check."
+    }
+
+    # --------------------------------------------------------
+    # DOWNLOAD ATMOSPHERE'S OFFICIAL SPLASH UTILITY
+    # --------------------------------------------------------
+
+    Write-Host ""
+    Write-Host "Downloading Atmosphere's official splash utility..."
+
+    Invoke-WebRequest `
+        -Uri $OfficialSplashScriptUrl `
+        -OutFile $PythonScript `
+        -UseBasicParsing `
+        -ErrorAction Stop
+
+    if (-not (Test-Path -LiteralPath $PythonScript -PathType Leaf)) {
+        throw "Atmosphere splash utility was not downloaded."
+    }
+
+    $PythonScriptFile = Get-Item -LiteralPath $PythonScript
+
+    if ($PythonScriptFile.Length -le 0) {
+        throw "Atmosphere splash utility is empty."
+    }
+
+    Write-Host "Downloaded official utility:"
+    Write-Host "  $PythonScript"
+    Write-Host "  Size: $($PythonScriptFile.Length) bytes"
 
     # --------------------------------------------------------
     # INSERT SPLASH
     # --------------------------------------------------------
 
+    Write-Host ""
     Write-Host "Inserting custom splash into Atmosphere package3..."
 
     & $PythonCommand `
@@ -1113,23 +1072,71 @@ if __name__ == "__main__":
         $Package3
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to insert custom Atmosphere splash into package3."
+        throw "Atmosphere's official splash insertion utility failed."
     }
 
     # --------------------------------------------------------
-    # VERIFY
+    # VERIFY PATCHED PACKAGE3
     # --------------------------------------------------------
 
-    $Package3After = Get-Item $Package3
+    $Package3After = Get-Item -LiteralPath $Package3
 
     if ($Package3After.Length -ne 0x800000) {
         throw "package3 size changed unexpectedly after splash insertion."
     }
 
+    $VerifyScript = Join-Path `
+        $Work `
+        "verify_splash.py"
+
+    $VerifyCode = @'
+import sys
+from pathlib import Path
+
+package3_path = Path(sys.argv[1])
+data = package3_path.read_bytes()
+
+if len(data) != 0x800000:
+    raise SystemExit("ERROR: package3 is not 8 MiB.")
+
+if data[:4] != b"PK31":
+    raise SystemExit("ERROR: package3 header is invalid.")
+
+splash_region = data[0x400000:0x7C0000]
+
+if len(splash_region) != 0x3C0000:
+    raise SystemExit("ERROR: splash region has the wrong size.")
+
+if not any(splash_region):
+    raise SystemExit("ERROR: splash region is completely empty.")
+
+print("OK: package3 contains a non-empty Atmosphere splash region.")
+'@
+
+    Set-Content `
+        -LiteralPath $VerifyScript `
+        -Value $VerifyCode `
+        -Encoding UTF8 `
+        -Force
+
+    & $PythonCommand `
+        $VerifyScript `
+        $Package3
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Patched Atmosphere package3 failed splash verification."
+    }
+
     Write-Host ""
-    Write-Host "OK: Custom Atmosphere splash installed."
-    Write-Host "    $SplashSource"
-    Write-Host "    -> atmosphere\package3"
+    Write-Host "========================================"
+    Write-Host "CUSTOM ATMOSPHERE SPLASH INSTALLED"
+    Write-Host "========================================"
+    Write-Host "Source:"
+    Write-Host "  $SplashSource"
+    Write-Host ""
+    Write-Host "Embedded into:"
+    Write-Host "  atmosphere\package3"
+    Write-Host ""
 }
 
 # ============================================================
